@@ -54,7 +54,8 @@ export function FinaleSidebar({ snap, jt, teamNames, tMs }: Props) {
       <ol className="finale-list">
         {order.map((teamIdx, i) => {
           const isUp = summited.has(teamIdx);
-          const wiped = states[teamIdx].wiped;
+          const st = states[teamIdx];
+          const wiped = st.wiped;
           return (
             <li
               key={teamIdx}
@@ -63,6 +64,21 @@ export function FinaleSidebar({ snap, jt, teamNames, tMs }: Props) {
               <span className="finale-rank">{isUp ? '✓' : i + 1}</span>
               <span className="feed-team-dot" style={{ background: snap.colors[teamIdx] }} />
               <span className="finale-name">{teamNames[teamIdx]}</span>
+              <span
+                className="finale-pips"
+                title={`${st.climberStatus.filter((c) => c === 'climbing' || c === 'injured' || c === 'resting').length} still climbing`}
+              >
+                {st.climberStatus.map((c, ci) => (
+                  <span
+                    key={ci}
+                    className={`pip ${
+                      c === 'fallen' ? 'pip-lost' : c === 'turned-back' ? 'pip-out' : 'pip-on'
+                    }`}
+                  >
+                    {c === 'fallen' ? '✕' : ''}
+                  </span>
+                ))}
+              </span>
               <span className="finale-alt">
                 {wiped
                   ? jt.lostShort

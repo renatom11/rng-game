@@ -39,6 +39,8 @@ export interface JourneyTheme {
   phaseLabel: (tMs: number, durationMs: number) => string;
   /** the playback bar's jump-to-finale button text */
   finaleJumpLabel: string;
+  /** results memorial heading; the memorial renders only when set and deaths exist */
+  memorialTitle?: string;
 }
 
 export const EVEREST_JOURNEY: JourneyTheme = {
@@ -86,4 +88,5 @@ export const EVEREST_JOURNEY: JourneyTheme = {
     return phase.charAt(0).toUpperCase() + phase.slice(1);
   },
   finaleJumpLabel: 'Summit push',
+  memorialTitle: 'The mountain keeps them',
 };

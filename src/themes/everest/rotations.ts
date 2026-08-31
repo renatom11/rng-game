@@ -113,11 +113,25 @@ function restIndexBelow(restFracs: number[], x: number): number {
   return idx;
 }
 
+/**
+ * A moment that visibly slows a team's choreography — a death in the squad.
+ * Decoration only: the fate layer scheduled these from its own stream, and
+ * the lag applied here is exactly zero before each event (no served byte
+ * ever anticipates a death) and decays to zero well before the Col approach
+ * (the push construction — and therefore the outcome's staging — is
+ * untouched, byte for byte).
+ */
+export interface PaceEvent {
+  teamIdx: number;
+  tMs: number;
+}
+
 export function buildDisplayTrack(
   rng: RNG,
   core: CoreTimeline,
   durationMs: number,
   route: RotationRoute = EVEREST_ROTATION_ROUTE,
+  paceEvents: PaceEvent[] = [],
 ): { tMs: number[]; pos: number[][] } {
   const n = core.grid.p.length;
   const tMs = sparseTimes(durationMs, [core.pushStartMs, ...core.summitTimesMs]);
@@ -131,8 +145,35 @@ export function buildDisplayTrack(
   const approachCap = normalCap * 2.25;
   const pushCatch = normalCap * 3;
 
+  // Short-handed lag tuning. sDur turns the effect fully off below 5 minutes
+  // (a 60s race has ~one Col-approach step of recovery headroom) and fully on
+  // from 15 minutes. Max total lag 0.06 clears easily: the free window
+  // [0.75, 0.78]·duration alone offers ≥ 0.20 of capped recovery.
+  const T_FREE = 0.75 * durationMs;
+  const sDur = Math.max(0, Math.min(1, (durationMs - 300_000) / 600_000));
+  const LAG_AMP = 0.035 * sDur;
+  const smooth = (u: number) => {
+    const c = Math.max(0, Math.min(1, u));
+    return c * c * (3 - 2 * c);
+  };
+
   for (let team = 0; team < n; team++) {
     const cycles = buildCycles(rng, durationMs, team, n, route.forceShallow ?? false);
+    const deaths = paceEvents
+      .filter((pe) => pe.teamIdx === team && pe.tMs < T_FREE)
+      .map((pe) => pe.tMs);
+    const lagAt = (t: number): number => {
+      if (LAG_AMP === 0 || deaths.length === 0) return 0;
+      let sum = 0;
+      for (const td of deaths) {
+        if (t <= td) continue; // exactly zero before (and at) the death
+        const up = smooth((t - td) / Math.max(1, 2 * step));
+        const downEnd = Math.min(td + 0.25 * durationMs, T_FREE);
+        const down = 1 - smooth((t - td) / Math.max(1, downEnd - td));
+        sum += LAG_AMP * up * down;
+      }
+      return Math.min(0.06, sum);
+    };
     const row: number[] = [];
     let lastPos = 0;
 
@@ -160,7 +201,8 @@ export function buildDisplayTrack(
         x = Math.max(x, lastPos - 0.0005); // effectively monotone here
       } else {
         // Rotation choreography. Max reach tracks p; oscillate below it.
-        const reach = Math.min(p, C4_FRAC - 0.02);
+        // A squad that lost someone visibly climbs lower for a while.
+        const reach = Math.max(0, Math.min(p, C4_FRAC - 0.02) - lagAt(t));
         const cycle = cycles.find((c) => t >= c.startMs && t < c.endMs);
         if (!cycle) {
           x = Math.min(reach, lastPos + 0.004);

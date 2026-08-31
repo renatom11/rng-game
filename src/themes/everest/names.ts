@@ -1,43 +1,15 @@
 import type { RNG } from '@/engine/prng';
-import { pick, randInt, shuffle } from '@/engine/prng';
+import { shuffle } from '@/engine/prng';
 import type { Climber } from './types';
+import { HERITAGES, SHERPA_HERITAGE, drawClimber, drawSirdar } from './people';
 
-/** Roles, in draft order — index 0 is always the expedition leader. */
-const ROLES = [
-  'Expedition Leader',
-  'Sirdar',
-  'Medic',
-  'Route Setter',
-  'Rope Chief',
-  'Navigator',
-  'Porter Captain',
-  'Weather Officer',
-];
-
-// 'Tashi' and the surname 'Sherpa' are reserved for sirdars — sharing them
-// with the general pools once produced two different climbers both named
-// "Tashi Sherpa", one of them in the same squad as the other.
-const FIRST = [
-  'Anya', 'Marco', 'Tenzin', 'Ingrid', 'Kenji', 'Rosa', 'Dmitri', 'Amara',
-  'Lars', 'Priya', 'Sofia', 'Emil', 'Yuki', 'Owen', 'Freya', 'Nikolai',
-  'Carmen', 'Elena', 'Piotr', 'Maren', 'Diego', 'Astrid', 'Rafael',
-  'Nadia', 'Finn', 'Leila', 'Viktor', 'Greta', 'Mateo', 'Zoya', 'Henrik',
-  'Alma', 'Stefan', 'Iris', 'Tomas', 'Vera', 'Andrei', 'Lucia', 'Bjorn',
-];
-
-const LAST = [
-  'Halvorsen', 'Okafor', 'Petrova', 'Sato', 'Lindqvist', 'Moreau', 'Katsaros',
-  'Novak', 'Fernandez', 'Berg', 'Takeda', 'Kovacs', 'Almeida',
-  'Nilsen', 'Volkov', 'Marchetti', 'Haugen', 'Reyes', 'Dahl', 'Ivanov',
-  'Costa', 'Larsen', 'Vasquez', 'Antonov', 'Strand', 'Romano', 'Eriksen',
-  'Duarte', 'Sokolov', 'Meyer', 'Norgay', 'Bakker', 'Silva', 'Weiss',
-];
-
-const SIRDAR_NAMES = [
-  'Pasang', 'Lhakpa', 'Mingma', 'Nima', 'Pemba', 'Dawa', 'Phurba', 'Ang Dorje',
-  'Kami', 'Tashi', 'Chhiring', 'Norbu', 'Gyalzen', 'Ang Rita', 'Dorje',
-  'Sonam', 'Karma', 'Lobsang', 'Tsering', 'Jangbu',
-];
+/**
+ * Roles, in draft order — index 0 is always the expedition leader. Squads
+ * are exactly four: every team fields a Leader, a Sirdar, a Medic, and a
+ * Route Setter (the sponsor's four souls on the mountain).
+ */
+export const SQUAD_SIZE = 4;
+export const SQUAD_ROLES = ['Expedition Leader', 'Sirdar', 'Medic', 'Route Setter'];
 
 export interface Cast {
   /** Per team: the sirdar's given name, used heavily in commentary. */
@@ -46,34 +18,38 @@ export interface Cast {
   epithet: string[];
 }
 
-const EPITHET_COLOR_WORD: Record<string, string> = {};
-
 export function buildSquads(
   rng: RNG,
   nTeams: number,
   colorNames: string[],
 ): { climbers: Climber[][]; cast: Cast } {
-  const firstPool = shuffle(rng, FIRST);
-  const lastPool = shuffle(rng, LAST);
-  const sirdarPool = shuffle(rng, SIRDAR_NAMES);
-  let fi = 0;
-  let li = 0;
+  const sirdarPool = shuffle(rng, SHERPA_HERITAGE.given);
+  // A shuffled heritage deck spreads squads across many nations before any
+  // heritage repeats; redealt when it runs out.
+  let deck = shuffle(rng, HERITAGES);
+  let di = 0;
+  const nextHeritage = () => {
+    if (di >= deck.length) {
+      deck = shuffle(rng, HERITAGES);
+      di = 0;
+    }
+    return deck[di++];
+  };
+  const usedNames = new Set<string>();
 
   const climbers: Climber[][] = [];
   const sirdar: string[] = [];
   const epithet: string[] = [];
 
   for (let t = 0; t < nTeams; t++) {
-    const size = randInt(rng, 4, 6);
     const squad: Climber[] = [];
     const sirdarName = sirdarPool[t % sirdarPool.length];
-    for (let c = 0; c < size; c++) {
-      const role = ROLES[c] ?? 'Climber';
+    for (let c = 0; c < SQUAD_SIZE; c++) {
+      const role = SQUAD_ROLES[c];
       if (role === 'Sirdar') {
-        squad.push({ name: `${sirdarName} Sherpa`, role });
+        squad.push(drawSirdar(rng, sirdarName, usedNames));
       } else {
-        const name = `${firstPool[fi++ % firstPool.length]} ${lastPool[li++ % lastPool.length]}`;
-        squad.push({ name, role });
+        squad.push(drawClimber(rng, nextHeritage(), role, usedNames));
       }
     }
     climbers.push(squad);

@@ -148,10 +148,35 @@ function nextCheckpointAfter(core: CoreTimeline, tMs: number) {
 export interface FatePlan {
   /** teams losing their entire squad, with when. Bottom placements only. */
   wipeouts: { teamIdx: number; tMs: number }[];
-  /** individual climber falls: teamIdx -> times (climber indices assigned later). */
-  falls: { teamIdx: number; tMs: number }[];
+  /** individual climber deaths: teamIdx -> times (climber identities and causes assigned later). */
+  falls: { teamIdx: number; tMs: number; zone?: 'icefall' | 'mid' | 'push' }[];
   injuries: { teamIdx: number; tMs: number }[];
   turnedBack: { teamIdx: number; tMs: number }[];
+}
+
+/** Storm windows: narrative weather used for death-cause flavor and ambient
+ * lines. Never serialized — generation-side only. */
+export interface WeatherPlan {
+  storms: { startMs: number; endMs: number }[];
+}
+
+export function buildWeather(rng: RNG, durationMs: number): WeatherPlan {
+  const nStorms = durationMs < 7_200_000 ? randInt(rng, 1, 2) : randInt(rng, 2, 3);
+  const storms: WeatherPlan['storms'] = [];
+  for (let k = 0; k < nStorms; k++) {
+    const len = durationMs * (0.04 + rng() * 0.04);
+    let placed = false;
+    for (let attempt = 0; attempt < 12 && !placed; attempt++) {
+      const start = durationMs * (0.15 + rng() * 0.75 * (1 - len / durationMs));
+      const end = start + len;
+      if (storms.every((s) => end < s.startMs - durationMs * 0.03 || start > s.endMs + durationMs * 0.03)) {
+        storms.push({ startMs: Math.round(start), endMs: Math.round(end) });
+        placed = true;
+      }
+    }
+  }
+  storms.sort((a, b) => a.startMs - b.startMs);
+  return { storms };
 }
 
 /**
@@ -197,7 +222,7 @@ export function buildFate(
       for (let f = 0; f < pre; f++) {
         // Foreshadowing falls land well before the wipeout itself.
         const t = core.pushStartMs * (0.55 + 0.4 * rng());
-        falls.push({ teamIdx: team, tMs: Math.round(t) });
+        falls.push({ teamIdx: team, tMs: Math.round(t), zone: 'mid' });
       }
       continue;
     }
@@ -205,18 +230,19 @@ export function buildFate(
     // (or 1, rarely — the lone-survivor summit is legendary).
     let maxFalls = Math.max(0, size - 2);
     if (rng() < 0.08) maxFalls = size - 1;
-    const nFalls = weightedPick(rng, [0, 1, 2], [0.52, 0.36, 0.12]);
+    const nFalls = weightedPick(rng, [0, 1, 2], [0.46, 0.38, 0.16]);
     const actual = Math.min(nFalls, maxFalls);
     for (let f = 0; f < actual; f++) {
       // Falls cluster where it's dangerous: icefall early, faces late.
       const zone = rng();
+      const zoneName = zone < 0.35 ? 'icefall' : zone < 0.6 ? 'mid' : 'push';
       const t =
         zone < 0.35
           ? durationMs * (0.04 + rng() * 0.2)
           : zone < 0.6
             ? durationMs * (0.35 + rng() * 0.3)
             : core.pushStartMs + rng() * (core.summitTimesMs[team] - core.pushStartMs) * 0.8;
-      falls.push({ teamIdx: team, tMs: Math.round(t) });
+      falls.push({ teamIdx: team, tMs: Math.round(t), zone: zoneName });
     }
     if (rng() < 0.35) {
       injuries.push({ teamIdx: team, tMs: Math.round(durationMs * (0.15 + rng() * 0.6)) });

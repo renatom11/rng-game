@@ -2,7 +2,7 @@ import { forkRng } from '@/engine/prng';
 import { generateCore } from '@/engine/generate';
 import { buildDisplayTrack } from './rotations';
 import { buildMeters, recomputeReadiness } from './meters';
-import { assignStyles, buildFate, buildTraversals } from './decorate';
+import { assignStyles, buildFate, buildTraversals, buildWeather } from './decorate';
 import { assignColors, buildSquads } from './names';
 import { buildEvents } from './events';
 import { SEGMENTS } from './route';
@@ -39,17 +39,25 @@ export function generateEverest(
     colorNames,
   );
 
-  const displayTrack = buildDisplayTrack(
-    forkRng(seedHex, 'rotations'),
-    core,
-    durationMs,
-  );
-
+  // Fate comes before the display track so already-scheduled deaths can
+  // decorate the choreography (short-handed teams visibly lag). forkRng is
+  // order-independent, so this reorder changes neither stream's values —
+  // and the coupling only ever runs fate → display, never anything → core.
   const fate = buildFate(
     forkRng(seedHex, 'fate'),
     core,
     durationMs,
     climbers.map((squad) => squad.length),
+  );
+
+  const weather = buildWeather(forkRng(seedHex, 'weather'), durationMs);
+
+  const displayTrack = buildDisplayTrack(
+    forkRng(seedHex, 'rotations'),
+    core,
+    durationMs,
+    undefined,
+    fate.falls,
   );
 
   // Freeze wiped teams where they were lost: the mountain keeps them.
@@ -86,6 +94,7 @@ export function generateEverest(
     meters,
     traversals,
     fate,
+    weather,
     climbers,
     cast,
     teamNames: config.teams.map((t) => t.name),

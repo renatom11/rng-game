@@ -1,5 +1,5 @@
 import type { JourneySnapshot } from '@/lib/slice';
-import type { ClimberStatus, RaceEvent } from '@/themes/everest/types';
+import type { ClimberStatus, DeathCause, RaceEvent } from '@/themes/everest/types';
 import { METER_KEYS } from '@/themes/everest/types';
 import { EVEREST_JOURNEY, type JourneyTheme } from './journeyTheme';
 
@@ -137,11 +137,18 @@ export function momentum(
   });
 }
 
+export interface ClimberDeath {
+  tMs: number;
+  cause?: DeathCause;
+}
+
 export interface TeamLiveState {
   activity: string;
   edgeId: string | null;
   wiped: boolean;
   climberStatus: ClimberStatus[];
+  /** Index-aligned with the squad: when and how each climber was lost (null = alive). */
+  deaths: (ClimberDeath | null)[];
 }
 
 /** Fold events up to t into per-team live state (activity, roster, edge). */
@@ -156,6 +163,7 @@ export function teamStatesAt(
     edgeId: null,
     wiped: false,
     climberStatus: snap.climbers[i].map(() => 'climbing' as ClimberStatus),
+    deaths: snap.climbers[i].map(() => null),
   }));
   for (const e of snap.events) {
     if (e.tMs > tMs) break;
@@ -168,6 +176,7 @@ export function teamStatesAt(
       // fall from it (defense in depth; generation avoids this too).
       if (s.climberStatus[e.climberIdx] !== 'turned-back') {
         s.climberStatus[e.climberIdx] = 'fallen';
+        s.deaths[e.climberIdx] = { tMs: e.tMs, cause: e.cause };
       }
     }
     if (e.type === 'climber_injured' && e.climberIdx !== undefined) {
@@ -182,9 +191,11 @@ export function teamStatesAt(
     }
     if (e.type === 'team_wipeout') {
       s.wiped = true;
-      s.climberStatus = s.climberStatus.map((c) =>
-        c === 'turned-back' ? c : 'fallen',
-      );
+      s.climberStatus = s.climberStatus.map((c, ci) => {
+        if (c === 'turned-back') return c;
+        if (s.deaths[ci] === null) s.deaths[ci] = { tMs: e.tMs, cause: e.cause };
+        return 'fallen';
+      });
     }
     if (e.type === 'summit') s.activity = jt.finishedActivity;
   }
@@ -223,6 +234,45 @@ export function teamStatesAt(
     }
   }
   return states;
+}
+
+export interface RaceDeath {
+  teamIdx: number;
+  climberIdx: number;
+  tMs: number;
+  cause?: DeathCause;
+}
+
+/**
+ * Every climber lost by time t (all delivered events), in the order they
+ * were lost — the memorial's data. Wipeouts contribute one entry per
+ * climber who hadn't already fallen or turned back.
+ */
+export function raceDeaths(snap: JourneySnapshot, tMs: number): RaceDeath[] {
+  const status: ClimberStatus[][] = snap.climbers.map((squad) =>
+    squad.map(() => 'climbing' as ClimberStatus),
+  );
+  const out: RaceDeath[] = [];
+  for (const e of snap.events) {
+    if (e.tMs > tMs) break;
+    if (e.teamIdx === undefined) continue;
+    const row = status[e.teamIdx];
+    if (e.type === 'climber_fall' && e.climberIdx !== undefined) {
+      if (row[e.climberIdx] !== 'turned-back' && row[e.climberIdx] !== 'fallen') {
+        row[e.climberIdx] = 'fallen';
+        out.push({ teamIdx: e.teamIdx, climberIdx: e.climberIdx, tMs: e.tMs, cause: e.cause });
+      }
+    } else if (e.type === 'climber_turned_back' && e.climberIdx !== undefined) {
+      if (row[e.climberIdx] !== 'fallen') row[e.climberIdx] = 'turned-back';
+    } else if (e.type === 'team_wipeout') {
+      row.forEach((c, ci) => {
+        if (c === 'turned-back' || c === 'fallen') return;
+        row[ci] = 'fallen';
+        out.push({ teamIdx: e.teamIdx!, climberIdx: ci, tMs: e.tMs, cause: e.cause });
+      });
+    }
+  }
+  return out;
 }
 
 /** Per-team, per-segment edge choices from delivered fork_choice events. */

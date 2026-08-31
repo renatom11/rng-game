@@ -9,9 +9,14 @@ import {
   standingsAt,
   teamStatesAt,
   teamTags,
+  type ClimberDeath,
 } from '@/lib/client/raceState';
+import { climberVitalsAt } from '@/lib/client/climberVitals';
+import { deathCauseLabel } from '@/lib/client/causeLabels';
 import type { ClimberStatus } from '@/themes/everest/types';
 import type { JourneyTheme } from '@/lib/client/journeyTheme';
+import ClimberPortrait from './ClimberPortrait';
+import { fmtClock } from './useRaceClock';
 
 const STATUS_CHIP: Record<ClimberStatus, string> = {
   climbing: 'ok',
@@ -105,8 +110,10 @@ export function Standings({ snap, jt, teamNames, tMs, durationMs, selected, onSe
                   snap={snap}
                   jt={jt}
                   teamIdx={teamIdx}
+                  teamName={teamNames[teamIdx]}
                   tMs={tMs}
                   climberStatus={st.climberStatus}
+                  deaths={st.deaths}
                   wiped={st.wiped}
                 />
               )}
@@ -122,19 +129,27 @@ function TeamCard({
   snap,
   jt,
   teamIdx,
+  teamName,
   tMs,
   climberStatus,
+  deaths,
   wiped,
 }: {
   snap: JourneySnapshot;
   jt: JourneyTheme;
   teamIdx: number;
+  teamName: string;
   tMs: number;
   climberStatus: ClimberStatus[];
+  deaths: (ClimberDeath | null)[];
   wiped: boolean;
 }) {
   const m = metersAt(snap, teamIdx, tMs);
   const squad = snap.climbers[teamIdx];
+  // Dossier squads (generated people with looks) get the full treatment;
+  // squads from before dossiers existed — and other themes — keep the
+  // original compact roster.
+  const dossier = squad.length > 0 && squad[0].look !== undefined;
   const [l1, l2, l3, l4, l5, l6, l7] = jt.meterLabels;
   const bars: [string, number][] = [
     [l1, m.o2],
@@ -148,19 +163,76 @@ function TeamCard({
   return (
     <div className="team-card">
       {wiped && <div className="team-card-wiped">{jt.wipedCard}</div>}
-      <div className="team-card-cols">
+      <div className={`team-card-cols${dossier ? ' dossier-cols' : ''}`}>
         <div>
-          <h3>{jt.squadTitle} · {snap.styles[teamIdx]}</h3>
-          <ul className="roster">
-            {squad.map((c, ci) => (
-              <li key={ci} className={`roster-row chip-${STATUS_CHIP[climberStatus[ci]]}`}>
-                <span className="roster-dot" aria-hidden />
-                <span className="roster-name">{c.name}</span>
-                <span className="roster-role">{c.role}</span>
-                <span className="roster-status">{jt.statusLabels[climberStatus[ci]]}</span>
-              </li>
-            ))}
-          </ul>
+          <h3>
+            {dossier
+              ? `Sponsored by ${teamName} · ${snap.styles[teamIdx]}`
+              : `${jt.squadTitle} · ${snap.styles[teamIdx]}`}
+          </h3>
+          {dossier ? (
+            <ul className="roster dossier">
+              {squad.map((c, ci) => {
+                const status = climberStatus[ci];
+                const death = deaths[ci];
+                const dead = status === 'fallen';
+                const v = climberVitalsAt(snap, teamIdx, ci, tMs, status, death);
+                return (
+                  <li
+                    key={ci}
+                    className={`dossier-row chip-${STATUS_CHIP[status]}${dead ? ' dossier-dead' : ''}`}
+                  >
+                    <ClimberPortrait
+                      look={c.look}
+                      accent={snap.colors[teamIdx]}
+                      dead={dead}
+                    />
+                    <span className="dossier-main">
+                      <span className="dossier-name">
+                        {c.flag && <span className="dossier-flag">{c.flag}</span>}
+                        {c.name}
+                        <span className="dossier-status">{jt.statusLabels[status]}</span>
+                      </span>
+                      <span className="dossier-meta">
+                        {c.role}
+                        {c.age !== undefined && ` · ${c.age}`}
+                        {c.hometown && ` · ${c.hometown}`}
+                      </span>
+                      {c.bio && !dead && <span className="dossier-bio">{c.bio}</span>}
+                      {dead && death ? (
+                        <span className="dossier-death">
+                          {deathCauseLabel(death.cause)} · {fmtClock(death.tMs)} ·{' '}
+                          {jt.positionLabel(displayPosAt(snap, teamIdx, death.tMs))}
+                        </span>
+                      ) : (
+                        <span className="dossier-vitals">
+                          {v.alive && status !== 'turned-back' ? (
+                            <>
+                              SpO₂ <strong>{v.spo2}</strong> · {v.tempC}°C · output{' '}
+                              <strong>{v.output}</strong> · {v.note}
+                            </>
+                          ) : (
+                            v.note || jt.statusLabels[status]
+                          )}
+                        </span>
+                      )}
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          ) : (
+            <ul className="roster">
+              {squad.map((c, ci) => (
+                <li key={ci} className={`roster-row chip-${STATUS_CHIP[climberStatus[ci]]}`}>
+                  <span className="roster-dot" aria-hidden />
+                  <span className="roster-name">{c.name}</span>
+                  <span className="roster-role">{c.role}</span>
+                  <span className="roster-status">{jt.statusLabels[climberStatus[ci]]}</span>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
         <div>
           <h3>Supplies & condition</h3>

@@ -1,8 +1,21 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import { generateEverest } from '@/themes/everest/generate';
-import type { EverestTimeline } from '@/themes/everest/types';
+import type { DeathCause, EverestTimeline } from '@/themes/everest/types';
 import { METER_KEYS } from '@/themes/everest/types';
-import { NODES, SEGMENTS } from '@/themes/everest/route';
+import { NODES, SEGMENTS, altitudeAt } from '@/themes/everest/route';
+import { HERITAGES, SHERPA_HERITAGE } from '@/themes/everest/people';
+import { SQUAD_ROLES } from '@/themes/everest/names';
+import { buildDisplayTrack } from '@/themes/everest/rotations';
+import {
+  DEATH_TEMPLATES,
+  SHORT_HANDED,
+  STORM_LINES,
+  STORM_ONSET,
+  WIPEOUT_TEMPLATES,
+} from '@/themes/everest/commentary/templates';
+import { LineWriter } from '@/lib/linewriter';
+import { forkRng } from '@/engine/prng';
+import { generateCore } from '@/engine/generate';
 import { HOLD_P } from '@/engine/types';
 
 function cfg(n: number, durationMs: number, style?: 'bold' | 'cautious') {
@@ -210,5 +223,194 @@ describe('everest theme', () => {
     const c4 = NODES.find((n) => n.id === 'C4')!;
     expect(Math.abs(c4.frac - 0.7)).toBeLessThan(0.02);
     expect(HOLD_P).toBeLessThan(c4.frac);
+  });
+});
+
+const DEATH_CAUSES: DeathCause[] = [
+  'fall-crevasse', 'fall-serac', 'fall-face', 'froze', 'exhaustion', 'altitude', 'avalanche',
+];
+
+function displayAt(t: EverestTimeline, teamIdx: number, tMs: number): number {
+  const ts = t.displayTrack.tMs;
+  const row = t.displayTrack.pos[teamIdx];
+  if (tMs <= ts[0]) return row[0];
+  for (let i = 1; i < ts.length; i++) {
+    if (ts[i] >= tMs) {
+      const f = (tMs - ts[i - 1]) / (ts[i] - ts[i - 1] || 1);
+      return row[i - 1] + f * (row[i] - row[i - 1]);
+    }
+  }
+  return row[row.length - 1];
+}
+
+describe('sponsored squads', () => {
+  it('every team fields exactly four, in the four roles, sirdar from the Sherpa bank', () => {
+    for (const t of runs) {
+      for (const squad of t.climbers) {
+        expect(squad.length).toBe(4);
+        expect(squad.map((c) => c.role)).toEqual(SQUAD_ROLES);
+        expect(squad[1].name.endsWith(' Sherpa')).toBe(true);
+        expect(squad[1].nationality).toBe('Nepal');
+      }
+    }
+  });
+
+  it('dossiers are complete, in-range, heritage-consistent, and never duplicated', () => {
+    for (const t of runs) {
+      const seen = new Set<string>();
+      for (const squad of t.climbers) {
+        for (const c of squad) {
+          expect(seen.has(c.name)).toBe(false);
+          seen.add(c.name);
+          expect(c.age).toBeGreaterThanOrEqual(21);
+          expect(c.age).toBeLessThanOrEqual(58);
+          expect(c.flag).toBeTruthy();
+          expect(c.nationality).toBeTruthy();
+          expect(c.hometown).toBeTruthy();
+          expect(c.bio).toBeTruthy();
+          expect(c.bio).not.toMatch(/\{\w+\}/);
+          const look = c.look!;
+          expect(look.skin).toBeGreaterThanOrEqual(0);
+          expect(look.skin).toBeLessThanOrEqual(5);
+          expect(look.hair).toBeGreaterThanOrEqual(0);
+          expect(look.hair).toBeLessThanOrEqual(5);
+          expect(look.hairColor).toBeGreaterThanOrEqual(0);
+          expect(look.hairColor).toBeLessThanOrEqual(4);
+          expect(look.headgear).toBeGreaterThanOrEqual(0);
+          expect(look.headgear).toBeLessThanOrEqual(3);
+          if (look.gender === 1) expect(look.facial).toBe(0);
+
+          if (c.role === 'Sirdar') {
+            expect(SHERPA_HERITAGE.hometowns).toContain(c.hometown);
+            const given = c.name.replace(/ Sherpa$/, '').split(' ')[0];
+            const bankGivens = SHERPA_HERITAGE.given.map((g) => g.split(' ')[0]);
+            expect(bankGivens).toContain(given);
+            expect(look.skin).toBeGreaterThanOrEqual(SHERPA_HERITAGE.skinBand[0]);
+            expect(look.skin).toBeLessThanOrEqual(SHERPA_HERITAGE.skinBand[1]);
+          } else {
+            const h = HERITAGES.find((x) => x.country === c.nationality)!;
+            expect(h).toBeTruthy();
+            const parts = c.name.split(' ');
+            const first = parts[0];
+            const last = parts[parts.length - 1];
+            expect([...h.firstM, ...h.firstF]).toContain(first);
+            const lastBankHit =
+              h.last.includes(last) ||
+              (h.feminizeLast &&
+                (h.last.includes(last.replace(/a$/, '')) ||
+                  h.last.includes(last.replace(/ska$/, 'ski'))));
+            expect(lastBankHit, `${c.name} surname not in ${h.id} bank`).toBe(true);
+            expect(h.hometowns).toContain(c.hometown);
+            expect(look.skin).toBeGreaterThanOrEqual(h.skinBand[0]);
+            expect(look.skin).toBeLessThanOrEqual(h.skinBand[1]);
+          }
+        }
+      }
+    }
+  });
+
+  it('the sirdar never falls individually', () => {
+    for (const t of runs) {
+      for (const e of t.events) {
+        if (e.type === 'climber_fall' && e.teamIdx !== undefined) {
+          expect(t.climbers[e.teamIdx][e.climberIdx!].role).not.toBe('Sirdar');
+        }
+      }
+    }
+  });
+
+  it('every death carries a valid cause obeying the hard altitude rules', () => {
+    for (const t of runs) {
+      for (const e of t.events) {
+        if (e.type === 'climber_fall') {
+          expect(DEATH_CAUSES).toContain(e.cause);
+          const alt = altitudeAt(displayAt(t, e.teamIdx!, e.tMs));
+          if (e.cause === 'fall-crevasse') expect(alt).toBeLessThan(6500);
+          if (e.cause === 'fall-serac') expect(alt).toBeLessThan(6200);
+          if (e.cause === 'fall-face') expect(alt).toBeGreaterThanOrEqual(6400);
+          if (e.cause === 'altitude') expect(alt).toBeGreaterThan(7000);
+          if (e.cause === 'avalanche') expect(alt).toBeLessThan(7400);
+        }
+        if (e.type === 'team_wipeout') {
+          expect(['froze', 'avalanche']).toContain(e.cause);
+        }
+      }
+    }
+  });
+
+  it('the mountain is dangerous but not a massacre, and deaths spread through the race', () => {
+    let total = 0;
+    let racesWith = 0;
+    const thirds = new Set<number>();
+    for (const t of runs) {
+      const wipedSet = new Set(t.wipeouts.map((w) => w.teamIdx));
+      const deaths = t.events.filter(
+        (e) => e.type === 'climber_fall' && !wipedSet.has(e.teamIdx!),
+      );
+      total += deaths.length;
+      if (t.events.some((e) => e.type === 'climber_fall')) racesWith++;
+      for (const d of deaths) thirds.add(Math.min(2, Math.floor((d.tMs / DUR) * 3)));
+    }
+    const mean = total / runs.length;
+    expect(mean).toBeGreaterThanOrEqual(2);
+    expect(mean).toBeLessThanOrEqual(8);
+    expect(racesWith / runs.length).toBeGreaterThanOrEqual(0.75);
+    expect(thirds.size).toBeGreaterThanOrEqual(2);
+  });
+
+  it('the short-handed pace lag is decoration-shaped', () => {
+    const core = generateCore('lag-seed-1', { nTeams: 8, durationMs: DUR });
+    const base = buildDisplayTrack(forkRng('lag-seed-1', 'rotations'), core, DUR);
+    const td = Math.round(0.3 * DUR);
+    const lag = buildDisplayTrack(forkRng('lag-seed-1', 'rotations'), core, DUR, undefined, [
+      { teamIdx: 0, tMs: td },
+    ]);
+    let maxGap = 0;
+    for (let i = 0; i < base.tMs.length; i++) {
+      const t = base.tMs[i];
+      const d = base.pos[0][i] - lag.pos[0][i];
+      // byte-identical before (and at) the death — no anticipatory signal
+      if (t <= td) expect(d).toBe(0);
+      // lag only ever slows, and only in the free window
+      if (t <= 0.75 * DUR) expect(lag.pos[0][i]).toBeLessThanOrEqual(base.pos[0][i] + 1e-9);
+      if (d > maxGap) maxGap = d;
+      // pace events for team 0 leave every other team untouched
+      for (let tm = 1; tm < 8; tm++) expect(lag.pos[tm][i]).toBe(base.pos[tm][i]);
+      // dead by push start
+      if (t >= core.pushStartMs) expect(Math.abs(d)).toBeLessThan(0.01);
+    }
+    expect(maxGap).toBeGreaterThanOrEqual(0.015); // the effect visibly exists
+    expect(lag.pos[0][lag.pos[0].length - 1]).toBeGreaterThan(0.99); // still summits
+  });
+
+  it('very short races opt out of the pace lag entirely', () => {
+    const SHORT = 120_000;
+    const core = generateCore('lag-seed-2', { nTeams: 6, durationMs: SHORT });
+    const base = buildDisplayTrack(forkRng('lag-seed-2', 'rotations'), core, SHORT);
+    const lag = buildDisplayTrack(forkRng('lag-seed-2', 'rotations'), core, SHORT, undefined, [
+      { teamIdx: 0, tMs: 30_000 },
+      { teamIdx: 2, tMs: 50_000 },
+    ]);
+    expect(JSON.stringify(lag)).toEqual(JSON.stringify(base));
+  });
+
+  it('every new template line renders with no unfilled slots', () => {
+    const writer = new LineWriter(forkRng('lint-seed', 'lint'));
+    const ctx = {
+      climber: 'Test Climber', role: 'medic', team: 'Test Team',
+      alt: 7000, edge: 'the test line', sherpa: 'Pasang', gap: 3,
+    };
+    const pools: readonly string[][] = [
+      ...Object.values(DEATH_TEMPLATES).map((p) => [...p]),
+      ...Object.values(WIPEOUT_TEMPLATES).map((p) => [...p]),
+      [...SHORT_HANDED],
+      [...STORM_ONSET],
+      [...STORM_LINES],
+    ];
+    for (const pool of pools) {
+      for (const line of pool) {
+        expect(writer.render(`lint:${line.slice(0, 12)}`, [line], ctx)).not.toMatch(/\{\w+\}/);
+      }
+    }
   });
 });

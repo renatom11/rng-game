@@ -2,8 +2,11 @@
 
 import type { JourneySnapshot } from '@/lib/slice';
 import type { JourneyTheme } from '@/lib/client/journeyTheme';
+import { displayPosAt, raceDeaths } from '@/lib/client/raceState';
+import { deathCauseLabel } from '@/lib/client/causeLabels';
 import { fmtClock } from './useRaceClock';
 import { ShareLink } from './Countdown';
+import ClimberPortrait from './ClimberPortrait';
 
 interface Props {
   snap: JourneySnapshot;
@@ -24,6 +27,7 @@ export function ResultsRecap({ snap, jt, teamNames, title, onReplay }: Props) {
   }
   const wipedSet = new Set(snap.wipeouts.map((w) => w.teamIdx));
   const keyMoments = snap.events.filter((e) => e.severity >= 3);
+  const deaths = jt.memorialTitle ? raceDeaths(snap, Number.MAX_SAFE_INTEGER) : [];
 
   return (
     <div className="results">
@@ -57,6 +61,47 @@ export function ResultsRecap({ snap, jt, teamNames, title, onReplay }: Props) {
         </button>
         <ShareLink />
       </div>
+
+      {deaths.length > 0 && (
+        <>
+          <h2 className="panel-title memorial-title">{jt.memorialTitle}</h2>
+          <ul className="memorial">
+            {deaths.map((d, i) => {
+              const c = snap.climbers[d.teamIdx][d.climberIdx];
+              return (
+                <li key={i} className="memorial-row">
+                  <ClimberPortrait
+                    look={c.look}
+                    accent={snap.colors[d.teamIdx]}
+                    dead
+                    size={36}
+                  />
+                  <span className="memorial-main">
+                    <span className="memorial-name">
+                      {c.flag && <span className="dossier-flag">{c.flag}</span>}
+                      {c.name}
+                      {c.age !== undefined && <span className="memorial-age">· {c.age}</span>}
+                    </span>
+                    <span className="memorial-meta">
+                      <span
+                        className="feed-team-dot"
+                        style={{ background: snap.colors[d.teamIdx] }}
+                      />
+                      {teamNames[d.teamIdx]} · {c.role}
+                    </span>
+                  </span>
+                  <span className="memorial-cause">
+                    {deathCauseLabel(d.cause)}
+                    <span className="memorial-when">
+                      {fmtClock(d.tMs)} · {jt.positionLabel(displayPosAt(snap, d.teamIdx, d.tMs))}
+                    </span>
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        </>
+      )}
 
       <h2 className="panel-title">How it happened</h2>
       <ol className="feed-list results-moments">

@@ -1,17 +1,23 @@
 import type { CoreTimeline } from '@/engine/types';
 import { PUSH_U } from '@/engine/types';
 import type { RNG } from '@/engine/prng';
-import { pick, randInt } from '@/engine/prng';
+import { pick, randInt, weightedPick } from '@/engine/prng';
 import { NODES, SEGMENTS, altitudeAt, nodeAtOrBelow, nodeById } from './route';
-import type { Climber, RaceEvent } from './types';
+import type { Climber, DeathCause, RaceEvent } from './types';
 import type { Cast } from './names';
-import type { FatePlan, Traversal } from './decorate';
+import type { FatePlan, Traversal, WeatherPlan } from './decorate';
+import type { Risk } from './route';
 import { LineWriter } from '@/lib/linewriter';
 import {
+  DEATH_TEMPLATES,
   PHASE_NAMES,
+  SHORT_HANDED,
+  STORM_LINES,
+  STORM_ONSET,
   TEMPLATES,
   TROUBLES,
   WEATHER_LINES,
+  WIPEOUT_TEMPLATES,
 } from './commentary/templates';
 import { METER_INDEX, nudgeMeter } from './meters';
 
@@ -30,6 +36,7 @@ interface BuildEventsInput {
   meters: number[][][];
   traversals: Traversal[];
   fate: FatePlan;
+  weather: WeatherPlan;
   climbers: Climber[][];
   cast: Cast;
   teamNames: string[];
@@ -46,13 +53,15 @@ function ordinal(place: number): string {
 
 export function buildEvents(input: BuildEventsInput): RaceEvent[] {
   const {
-    rng, core, durationMs, displayTrack, meters, traversals, fate,
+    rng, core, durationMs, displayTrack, meters, traversals, fate, weather,
     climbers, cast, teamNames,
   } = input;
   const n = teamNames.length;
   const writer = new LineWriter(rng);
   const events: RaceEvent[] = [];
   const wipedAt = new Map(fate.wipeouts.map((w) => [w.teamIdx, w.tMs]));
+  const inStorm = (tMs: number) =>
+    weather.storms.some((s) => tMs >= s.startMs && tMs <= s.endMs);
 
   const ctxFor = (teamIdx: number) => ({
     team: teamNames[teamIdx],
@@ -89,6 +98,15 @@ export function buildEvents(input: BuildEventsInput): RaceEvent[] {
     severity: 3,
     text: line('weather_window', {}),
   });
+
+  for (const storm of weather.storms) {
+    events.push({
+      tMs: storm.startMs,
+      type: 'weather',
+      severity: 2,
+      text: writer.render('storm_onset', STORM_ONSET, {}),
+    });
+  }
 
   // --- Track-derived team movement events ---------------------------------
   const times = displayTrack.tMs;
@@ -266,13 +284,14 @@ export function buildEvents(input: BuildEventsInput): RaceEvent[] {
 
   // --- Fate: falls, injuries, turn-backs, wipeouts -------------------------
   // Climber identities are drawn randomly among the ELIGIBLE: never the
-  // expedition leader (index 0) or the sirdar — both keep speaking in
-  // commentary — and never a climber already fallen or turned back. A
+  // sirdar — the structural radio voice keeps speaking in ungated commentary
+  // lines — and never a climber already fallen or turned back. A
   // deterministic formula here once made the sirdar always fall first, then
-  // keep narrating from beyond the bergschrund.
+  // keep narrating from beyond the bergschrund. (The expedition leader is
+  // mortal like everyone else; only the sirdar's voice is load-bearing.)
   const fated: Set<number>[] = climbers.map(() => new Set<number>());
   const protectedIdx = (teamIdx: number): Set<number> => {
-    const s = new Set<number>([0]);
+    const s = new Set<number>();
     climbers[teamIdx].forEach((c, i) => {
       if (c.role === 'Sirdar') s.add(i);
     });
@@ -285,6 +304,42 @@ export function buildEvents(input: BuildEventsInput): RaceEvent[] {
       .filter((i) => !off.has(i) && !fated[teamIdx].has(i));
     if (eligible.length === 0) return null;
     return eligible[randInt(rng, 0, eligible.length - 1)];
+  };
+
+  // Cause selection: weighted by where and when the death happens, with hard
+  // altitude rules (a crevasse needs a glacier under you; HACE needs thin
+  // air). Purely narrative — the death itself was already scheduled.
+  const meterAt = (teamIdx: number, meterIdx: number, tMs: number): number => {
+    const row = meters[teamIdx][meterIdx];
+    if (tMs <= times[0]) return row[0];
+    for (let i = 1; i < times.length; i++) {
+      if (times[i] >= tMs) {
+        const f = (tMs - times[i - 1]) / (times[i] - times[i - 1] || 1);
+        return row[i - 1] + f * (row[i] - row[i - 1]);
+      }
+    }
+    return row[row.length - 1];
+  };
+  const pickCause = (teamIdx: number, tMs: number, alt: number, edgeRisk: Risk | null): DeathCause => {
+    const inPush = tMs >= core.pushStartMs;
+    const storm = inStorm(tMs);
+    const food = meterAt(teamIdx, METER_INDEX.FOOD, tMs);
+    const energy = meterAt(teamIdx, METER_INDEX.ENERGY, tMs);
+    const causes: DeathCause[] = [];
+    const weights: number[] = [];
+    const add = (c: DeathCause, w: number) => {
+      causes.push(c);
+      weights.push(w);
+    };
+    if (alt < 6500) add('fall-crevasse', alt < 6000 ? 3 : 1);
+    if (alt < 6200) add('fall-serac', 1.5);
+    if (alt >= 6400) add('fall-face', edgeRisk === 'risky' ? 3 : 1.5);
+    if (alt > 7000 || inPush) add('froze', storm ? 6 : 1);
+    add('exhaustion', food < 40 || energy < 35 ? 4 : 0.7);
+    if (alt > 7000) add('altitude', alt > 8300 ? 3 : 1.5);
+    if (alt < 7400) add('avalanche', (storm ? 2 : 1) * (edgeRisk === 'risky' ? 1.6 : 0.8));
+    if (causes.length === 0) return 'fall-face';
+    return weightedPick(rng, causes, weights);
   };
 
   // Fates are ordered by time so eligibility folds forward correctly.
@@ -301,19 +356,31 @@ export function buildEvents(input: BuildEventsInput): RaceEvent[] {
       if (climberIdx === null) continue;
       fated[f.teamIdx].add(climberIdx);
       const alt = altitudeAt(displayAtTime(displayTrack, f.teamIdx, f.tMs));
-      const edge = nearestEdgeLabel(traversals, f.teamIdx, f.tMs);
+      const near = nearestEdge(traversals, f.teamIdx, f.tMs);
+      const cause = pickCause(f.teamIdx, f.tMs, alt, near?.risk ?? null);
       events.push({
         tMs: f.tMs, type: 'climber_fall', teamIdx: f.teamIdx, climberIdx, severity: 3,
-        text: line('climber_fall', {
+        cause,
+        text: writer.render(`climber_fall:${cause}`, DEATH_TEMPLATES[cause], {
           ...ctxFor(f.teamIdx),
           climber: squad[climberIdx].name,
           role: squad[climberIdx].role.toLowerCase(),
           alt,
-          edge,
+          edge: near?.label ?? 'the fixed lines',
         }),
       });
       nudgeMeter(meters, f.teamIdx, METER_INDEX.MORALE, times, f.tMs, -16);
       nudgeMeter(meters, f.teamIdx, METER_INDEX.MED, times, f.tMs, -8);
+      nudgeMeter(meters, f.teamIdx, METER_INDEX.ENERGY, times, f.tMs, -8);
+      // A little later: the squad is smaller, and the mountain notices.
+      const shT = f.tMs + Math.max(60_000, durationMs * 0.02);
+      const wipeAt = wipedAt.get(f.teamIdx);
+      if (shT < core.pushStartMs && (wipeAt === undefined || shT < wipeAt)) {
+        events.push({
+          tMs: Math.round(shT), type: 'radio', teamIdx: f.teamIdx, severity: 1,
+          text: writer.render('short_handed', SHORT_HANDED, ctxFor(f.teamIdx)),
+        });
+      }
     } else if (f.kind === 'injury') {
       const climberIdx = pickVictim(f.teamIdx);
       if (climberIdx === null) continue;
@@ -341,10 +408,20 @@ export function buildEvents(input: BuildEventsInput): RaceEvent[] {
     }
   }
   for (const w of fate.wipeouts) {
+    // Wipes sit in the push window at Col altitudes: the plausible ways to
+    // lose everyone at once are the storm or the slope.
+    const nearStorm = weather.storms.some(
+      (s) => w.tMs >= s.startMs - durationMs * 0.05 && w.tMs <= s.endMs + durationMs * 0.05,
+    );
+    const cause: DeathCause = nearStorm ? 'froze' : 'avalanche';
     events.push({
       tMs: w.tMs, type: 'team_wipeout', teamIdx: w.teamIdx, severity: 3,
       activity: 'Lost on the mountain',
-      text: line('team_wipeout', { ...ctxFor(w.teamIdx), gap: w.teamIdx + 1 }),
+      cause,
+      text: writer.render(`team_wipeout:${cause}`, WIPEOUT_TEMPLATES[cause], {
+        ...ctxFor(w.teamIdx),
+        gap: w.teamIdx + 1,
+      }),
     });
   }
 
@@ -434,7 +511,8 @@ export function buildEvents(input: BuildEventsInput): RaceEvent[] {
     if (roll < 0.4 && radioTeam !== null) {
       ambient.push({ tMs, type: 'radio', severity: 0, text: line('radio', { camp: pick(rng, NODES).label, team: teamNames[radioTeam], sherpa: cast.sirdar[radioTeam] }) });
     } else if (roll < 0.7) {
-      ambient.push({ tMs, type: 'weather', severity: 0, text: line('weather', { weather: pick(rng, WEATHER_LINES) }) });
+      const pool = inStorm(tMs) ? STORM_LINES : WEATHER_LINES;
+      ambient.push({ tMs, type: 'weather', severity: 0, text: line('weather', { weather: pick(rng, pool) }) });
     } else {
       ambient.push({ tMs, type: 'color', severity: 0, text: line('color', { camp: pick(rng, NODES).label, alt: pick(rng, [5364, 6065, 6400, 7160, 7950]) }) });
     }
@@ -502,19 +580,19 @@ function lastCheckpointAt(core: CoreTimeline, tMs: number) {
   return best;
 }
 
-function nearestEdgeLabel(
+function nearestEdge(
   traversals: Traversal[],
   teamIdx: number,
   tMs: number,
-): string {
-  let best = 'the fixed lines';
+): { label: string; risk: Risk } | null {
+  let best: { label: string; risk: Risk } | null = null;
   let bestDt = Infinity;
   for (const tr of traversals) {
     if (tr.teamIdx !== teamIdx) continue;
     const dt = Math.abs(tr.tMs - tMs);
     if (dt < bestDt) {
       bestDt = dt;
-      best = tr.edge.label;
+      best = { label: tr.edge.label, risk: tr.edge.risk };
     }
   }
   return best;

@@ -11,11 +11,15 @@ act.
 
 Three themes ship today, all skins over the same fair core:
 
-- **🏔 Everest Expedition** — squads of climbers work up the mountain through
-  acclimatization rotations, storms, risky-vs-safe route choices, dwindling
-  oxygen, individual falls (and, rarely, a whole expedition lost), converging
-  on the South Col for a live summit-push finale. Order of summiting is the
-  result.
+- **🏔 Everest Expedition** — every name sponsors a squad of four generated
+  climbers: real-feeling people with heritage-consistent names, portraits,
+  ages, hometowns, and one-line backstories, each with live vitals (SpO₂,
+  core temp, output). They work up the mountain through acclimatization
+  rotations, storms, risky-vs-safe route choices, and dwindling oxygen —
+  and some of them die, each with a visible cause (crevasse, serac, the
+  face, exposure, exhaustion, altitude sickness, avalanche). Short-handed
+  squads visibly climb slower; a results memorial names everyone the
+  mountain kept. Order of summiting is the result.
 - **🏅 The Games** — delegations compete across a full Olympic programme with
   live events, a medal table, and backloaded marquee events; the closing
   event decides gold. Final points table is the result.
@@ -77,9 +81,13 @@ src/engine/          Theme-agnostic fair core (pure, deterministic):
                      summit-push construction (bounded, decaying drama);
                      monotone progress curves on a shared grid.
 src/themes/everest/  Route DAG w/ risk-graded parallel edges, rotation
-                     choreography, squads/resources/condition meters,
-                     falls & wipeouts (bottom placements only, late),
-                     event log + commentary template library.
+                     choreography (with a decorative short-handed pace
+                     lag), generated four-person squads (heritage-linked
+                     name banks, dossiers, portrait looks), squad
+                     resources/condition meters + derived per-climber
+                     vitals, storm windows, deaths with structured causes,
+                     wipeouts (bottom placements only, late), event log +
+                     commentary template library.
 src/themes/olympics/ Event schedule concluding on core checkpoints,
                      integer points tables realizing each standings order,
                      marquee convergence, live within-event lane curves,
@@ -112,12 +120,16 @@ didn't already decide.
 
 ## Testing
 
-`npm test` runs 70 tests: byte-level determinism, chi-square uniformity,
+`npm test` runs 84 tests: byte-level determinism, chi-square uniformity,
 pairwise head-to-head balance, reachability cell coverage, convergence rank
 bounds through the finale, monotonicity/no-teleport guards, resource-range
 and continuity checks, wipeout placement constraints, event-density and
 silent-gap rules, template slot integrity, points-table realization, live
-curve convergence, and API-level leak scans of serialized payloads.
+curve convergence, API-level leak scans of serialized payloads, and the
+squad layer: dossier/heritage integrity, death-cause altitude rules,
+mortality-rate bounds, sirdar protection, vitals ranges, and proof that
+the short-handed pace lag is byte-identical to no-lag before each death
+(no served byte anticipates a loss).
 
 The engine and app layer have also each been through an adversarial
 multi-agent review (independent skeptical reviewers plus a refutation pass);

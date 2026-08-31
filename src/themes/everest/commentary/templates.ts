@@ -1,4 +1,4 @@
-import type { EventType } from '../types';
+import type { DeathCause, EventType } from '../types';
 
 /**
  * Commentary template library. Slots: {team} {rival} {sherpa} {epithet}
@@ -169,6 +169,88 @@ export const TEMPLATES: Record<EventType, readonly string[]> = {
     'A chocolate bar, carried three weeks for this exact moment, is shared eight ways.',
   ],
 };
+
+/**
+ * Cause-specific death lines. Rendered under pool key `climber_fall:<cause>`
+ * so anti-repetition cycles per cause. Slots available at the one call site:
+ * {climber} {role} {team} {alt} {edge} {sherpa}.
+ */
+export const DEATH_TEMPLATES: Record<DeathCause, readonly string[]> = {
+  'fall-crevasse': [
+    'The ladder shifts, the rope comes taut, and {climber} of {team} is gone into the blue below. The Icefall keeps what it takes.',
+    'A crevasse takes {climber} — {team}’s {role} — in one silent second. The rope team stares at the edge for a long time.',
+    '{climber} steps where ten thousand steps have held, and the glacier opens. {team} anchor, call down, wait. The mountain does not answer.',
+  ],
+  'fall-serac': [
+    'A serac the size of a house lets go above {edge}. {climber} of {team} does not come out the other side.',
+    'The ice towers shrug — that is all it takes. {team} lose {climber}, their {role}, beneath the collapse.',
+    'Blue ice, falling. When the cloud settles, {team} count heads and come up one short: {climber}.',
+  ],
+  'fall-face': [
+    'A crampon skates on bare ice at {alt} metres — {climber}, {team}’s {role}, is off the mountain. The rope teams go silent.',
+    'Disaster for {team} on {edge}: {climber} falls, and the face gives nothing back.',
+    '{team} lose {climber} on {edge} at {alt} metres. There is no time to grieve up here; that comes later.',
+  ],
+  froze: [
+    'The cold wins one. {climber} of {team} sits down at {alt} metres and does not stand up again.',
+    '{team} find {climber} still clipped to the line, facing the sunrise, already gone. The cold took them where they stood.',
+    'Radio from {team}, very quiet: {climber} did not make it through the night. At {alt} metres the cold is not weather; it is a verdict.',
+  ],
+  exhaustion: [
+    '{climber} of {team} has given everything, and everything was not enough. They stop, sit, and slip away within the hour.',
+    'The tank runs empty at {alt} metres. {team} lose {climber} — not to a fall, not to a storm. To the arithmetic.',
+    'No food, no strength, no margin: {climber}, {team}’s {role}, is gone quietly between camps.',
+  ],
+  altitude: [
+    'HACE takes hold of {climber} above {alt} metres. {sherpa} calls it early, but there is no “down” fast enough. {team} lose their {role}.',
+    '{climber} of {team} stops making sense on the radio, then stops talking. Altitude sickness — the thin air claims its own.',
+    'The altitude finds {climber}. {team} do everything right, and it does not matter.',
+  ],
+  avalanche: [
+    'The slope above {edge} releases. When the snow settles, {team} dig — and find only {climber}’s pack.',
+    'Avalanche across the route! {team} count off — {climber}, their {role}, does not answer.',
+    'A white wall takes the line {climber} was crossing. {team} probe until dark.',
+  ],
+};
+
+/** Wipeout lines by cause, pool-keyed `team_wipeout:<cause>`. Slots: {team} {gap}. */
+export const WIPEOUT_TEMPLATES: Record<'froze' | 'avalanche', readonly string[]> = {
+  froze: [
+    'Silence on channel {gap}. {team} sat out the storm high on the mountain, and the storm outlasted them. The expedition is over — the mountain keeps them.',
+    'The wind drops at last, and {team}’s tents are empty shells of ice. All of them, gone to the cold.',
+    'The unthinkable: {team} are gone. All of them. The other camps stand in silence, then keep climbing, because that is what you do.',
+  ],
+  avalanche: [
+    'The face above {team} releases all at once — the whole slope. Channel {gap} goes quiet and stays quiet. The mountain keeps them.',
+    'One roar, then stillness. Where {team}’s rope was, there is only new snow. No one is coming out.',
+    'The unthinkable: {team} are gone. All of them. The other camps stand in silence, then keep climbing, because that is what you do.',
+  ],
+};
+
+/** Radio lines after a death: the squad is smaller and the pace shows it.
+ * Slots: {team} {sherpa}. */
+export const SHORT_HANDED = [
+  '{team} redistribute the load — three packs where four should be. The pace shows it.',
+  'Short-handed now, {team} climb slower and closer together. {sherpa} keeps them roped tight.',
+  'Every task in {team}’s camp takes longer tonight. A missing person is also missing hands.',
+  '{team} move again, carefully, carrying more each and saying less.',
+  'The rope behind {sherpa} is shorter than it was. {team} climb on at a diminished pace.',
+];
+
+/** Severity-2 weather events at each storm onset. No slots. */
+export const STORM_ONSET = [
+  'The sky closes. A storm is on the mountain, and every camp is suddenly holding its breath.',
+  'Barometers dive across the camps. Here comes the weather.',
+  'The forecast tent goes quiet, then very busy: storm inbound. Ropes are fixed, tents double-staked.',
+];
+
+/** Ambient weather lines used while a storm window is open. */
+export const STORM_LINES = [
+  'Wind over the ridgelines like a freight train. Nobody moves.',
+  'Visibility down to a rope length. The camps hunker and wait.',
+  'Snow loads the high slopes hour by hour. The avalanche watchers do not sleep.',
+  'Tents flex to the limit of their poles. Everything that can be tied down is.',
+];
 
 export const TROUBLES = [
   'a shredded crampon strap',

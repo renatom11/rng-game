@@ -163,6 +163,12 @@ describe('space theme', () => {
     }
   });
 
+  it('space crews stay dossier-free (the Everest people machinery is theme-scoped)', () => {
+    const t = runs[0];
+    expect(t.climbers[0][0].look).toBeUndefined();
+    expect(t.climbers[0][0].nationality).toBeUndefined();
+  });
+
   it('route geometry is consistent with the journey contract', () => {
     expect(NODES[0].frac).toBe(0);
     expect(NODES[NODES.length - 1].frac).toBe(1);
