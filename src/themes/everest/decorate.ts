@@ -220,9 +220,17 @@ export function buildFate(
       // 1–2 falls foreshadow the wipeout; the rest are lost at the wipe.
       const pre = randInt(rng, 1, Math.min(2, size - 1));
       for (let f = 0; f < pre; f++) {
-        // Foreshadowing falls land well before the wipeout itself.
-        const t = core.pushStartMs * (0.55 + 0.4 * rng());
-        falls.push({ teamIdx: team, tMs: Math.round(t), zone: 'mid' });
+        // Foreshadowing falls draw from EXACTLY the same pre-push time
+        // windows as everyone else's falls. A distinct window here once
+        // created a spoiler side channel: any fall in the wiped-only band
+        // identified its team as the last-place finisher hours early.
+        const zone = rng();
+        const zoneName = zone < 0.58 ? 'icefall' : 'mid';
+        const t =
+          zoneName === 'icefall'
+            ? durationMs * (0.04 + rng() * 0.2)
+            : durationMs * (0.35 + rng() * 0.3);
+        falls.push({ teamIdx: team, tMs: Math.round(t), zone: zoneName });
       }
       continue;
     }

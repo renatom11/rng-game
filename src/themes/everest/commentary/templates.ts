@@ -177,7 +177,7 @@ export const TEMPLATES: Record<EventType, readonly string[]> = {
  */
 export const DEATH_TEMPLATES: Record<DeathCause, readonly string[]> = {
   'fall-crevasse': [
-    'The ladder shifts, the rope comes taut, and {climber} of {team} is gone into the blue below. The Icefall keeps what it takes.',
+    'The ladder shifts, the rope comes taut, and {climber} of {team} is gone into the blue below. The glacier keeps what it takes.',
     'A crevasse takes {climber} — {team}’s {role} — in one silent second. The rope team stares at the edge for a long time.',
     '{climber} steps where ten thousand steps have held, and the glacier opens. {team} anchor, call down, wait. The mountain does not answer.',
   ],
@@ -230,7 +230,7 @@ export const WIPEOUT_TEMPLATES: Record<'froze' | 'avalanche', readonly string[]>
 /** Radio lines after a death: the squad is smaller and the pace shows it.
  * Slots: {team} {sherpa}. */
 export const SHORT_HANDED = [
-  '{team} redistribute the load — three packs where four should be. The pace shows it.',
+  '{team} redistribute the load — more weight on fewer shoulders. The pace shows it.',
   'Short-handed now, {team} climb slower and closer together. {sherpa} keeps them roped tight.',
   'Every task in {team}’s camp takes longer tonight. A missing person is also missing hands.',
   '{team} move again, carefully, carrying more each and saying less.',
@@ -244,10 +244,12 @@ export const STORM_ONSET = [
   'The forecast tent goes quiet, then very busy: storm inbound. Ropes are fixed, tents double-staked.',
 ];
 
-/** Ambient weather lines used while a storm window is open. */
+/** Ambient weather lines used while a storm window is open. Teams may
+ * still be narrated moving through it, so the lines slow the world down
+ * without claiming it has stopped. */
 export const STORM_LINES = [
-  'Wind over the ridgelines like a freight train. Nobody moves.',
-  'Visibility down to a rope length. The camps hunker and wait.',
+  'Wind over the ridgelines like a freight train. The teams still out keep their heads down.',
+  'Visibility down to a rope length. Progress, where there is any, slows to a crawl.',
   'Snow loads the high slopes hour by hour. The avalanche watchers do not sleep.',
   'Tents flex to the limit of their poles. Everything that can be tied down is.',
 ];

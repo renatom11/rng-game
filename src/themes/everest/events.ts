@@ -335,7 +335,11 @@ export function buildEvents(input: BuildEventsInput): RaceEvent[] {
     if (alt < 6200) add('fall-serac', 1.5);
     if (alt >= 6400) add('fall-face', edgeRisk === 'risky' ? 3 : 1.5);
     if (alt > 7000 || inPush) add('froze', storm ? 6 : 1);
-    add('exhaustion', food < 40 || energy < 35 ? 4 : 0.7);
+    // Exhaustion needs a story the meters can back up: depleted supplies,
+    // or at least the long grind of the second half.
+    if (food < 55 || energy < 50 || tMs > durationMs * 0.5) {
+      add('exhaustion', food < 40 || energy < 35 ? 4 : 0.7);
+    }
     if (alt > 7000) add('altitude', alt > 8300 ? 3 : 1.5);
     if (alt < 7400) add('avalanche', (storm ? 2 : 1) * (edgeRisk === 'risky' ? 1.6 : 0.8));
     if (causes.length === 0) return 'fall-face';
@@ -355,8 +359,9 @@ export function buildEvents(input: BuildEventsInput): RaceEvent[] {
       const climberIdx = pickVictim(f.teamIdx);
       if (climberIdx === null) continue;
       fated[f.teamIdx].add(climberIdx);
-      const alt = altitudeAt(displayAtTime(displayTrack, f.teamIdx, f.tMs));
-      const near = nearestEdge(traversals, f.teamIdx, f.tMs);
+      const posAtFall = displayAtTime(displayTrack, f.teamIdx, f.tMs);
+      const alt = altitudeAt(posAtFall);
+      const near = nearestEdge(traversals, f.teamIdx, f.tMs, posAtFall);
       const cause = pickCause(f.teamIdx, f.tMs, alt, near?.risk ?? null);
       events.push({
         tMs: f.tMs, type: 'climber_fall', teamIdx: f.teamIdx, climberIdx, severity: 3,
@@ -409,11 +414,12 @@ export function buildEvents(input: BuildEventsInput): RaceEvent[] {
   }
   for (const w of fate.wipeouts) {
     // Wipes sit in the push window at Col altitudes: the plausible ways to
-    // lose everyone at once are the storm or the slope.
-    const nearStorm = weather.storms.some(
-      (s) => w.tMs >= s.startMs - durationMs * 0.05 && w.tMs <= s.endMs + durationMs * 0.05,
+    // lose everyone at once are the storm or the slope. The froze story
+    // ("the storm outlasted them") only holds while a storm is actually on.
+    const inStormNow = weather.storms.some(
+      (s) => w.tMs >= s.startMs && w.tMs <= s.endMs,
     );
-    const cause: DeathCause = nearStorm ? 'froze' : 'avalanche';
+    const cause: DeathCause = inStormNow ? 'froze' : 'avalanche';
     events.push({
       tMs: w.tMs, type: 'team_wipeout', teamIdx: w.teamIdx, severity: 3,
       activity: 'Lost on the mountain',
@@ -580,18 +586,27 @@ function lastCheckpointAt(core: CoreTimeline, tMs: number) {
   return best;
 }
 
+/**
+ * The route line a death can honestly be pinned to: the latest traversal the
+ * team has already committed to (never a future fork) whose segment contains
+ * the team's current display position. A death during a rotation descent —
+ * below every segment the team crossed recently — gets no edge anchor, and
+ * the template's generic "the fixed lines" stands in.
+ */
 function nearestEdge(
   traversals: Traversal[],
   teamIdx: number,
   tMs: number,
+  pos: number,
 ): { label: string; risk: Risk } | null {
   let best: { label: string; risk: Risk } | null = null;
-  let bestDt = Infinity;
   for (const tr of traversals) {
     if (tr.teamIdx !== teamIdx) continue;
-    const dt = Math.abs(tr.tMs - tMs);
-    if (dt < bestDt) {
-      bestDt = dt;
+    if (tr.tMs > tMs) break; // traversals are time-sorted; the rest are future
+    const seg = SEGMENTS[tr.segIdx];
+    const fromFrac = nodeById.get(seg.from)!.frac;
+    const toFrac = nodeById.get(seg.to)!.frac;
+    if (pos >= fromFrac - 0.02 && pos <= toFrac + 0.02) {
       best = { label: tr.edge.label, risk: tr.edge.risk };
     }
   }

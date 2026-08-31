@@ -48,4 +48,5 @@ export const SPACE_JOURNEY: JourneyTheme = {
     return phase.charAt(0).toUpperCase() + phase.slice(1);
   },
   finaleJumpLabel: 'Final descent',
+  stillActiveLabel: (n) => `${n} still aboard`,
 };

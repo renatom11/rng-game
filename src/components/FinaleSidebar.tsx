@@ -66,7 +66,11 @@ export function FinaleSidebar({ snap, jt, teamNames, tMs }: Props) {
               <span className="finale-name">{teamNames[teamIdx]}</span>
               <span
                 className="finale-pips"
-                title={`${st.climberStatus.filter((c) => c === 'climbing' || c === 'injured' || c === 'resting').length} still climbing`}
+                title={(jt.stillActiveLabel ?? ((n: number) => `${n} active`))(
+                  st.climberStatus.filter(
+                    (c) => c === 'climbing' || c === 'injured' || c === 'resting',
+                  ).length,
+                )}
               >
                 {st.climberStatus.map((c, ci) => (
                   <span

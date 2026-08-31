@@ -338,6 +338,24 @@ describe('sponsored squads', () => {
     }
   });
 
+  it('no fall lands in a wiped-only time window (the timing side channel is closed)', () => {
+    // Regression: wipeout-foreshadow falls once drew from a window
+    // ((0.65, 0.87)·duration) no other fall could occupy, so a served
+    // pre-push fall event identified its team as the last-place finisher.
+    // Every pre-push fall must now sit inside the shared windows.
+    for (const t of runs) {
+      const pushStart = t.core.pushStartMs;
+      for (const e of t.events) {
+        if (e.type !== 'climber_fall') continue;
+        if (e.tMs >= pushStart) continue;
+        const u = e.tMs / DUR;
+        const inIcefall = u >= 0.04 - 1e-9 && u <= 0.24 + 1e-9;
+        const inMid = u >= 0.35 - 1e-9 && u <= 0.65 + 1e-9;
+        expect(inIcefall || inMid, `fall at u=${u.toFixed(3)} outside shared windows`).toBe(true);
+      }
+    }
+  });
+
   it('the mountain is dangerous but not a massacre, and deaths spread through the race', () => {
     let total = 0;
     let racesWith = 0;

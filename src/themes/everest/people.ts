@@ -111,7 +111,7 @@ export const HERITAGES: Heritage[] = [
     id: 'norwegian',
     country: 'Norway',
     flag: '🇳🇴',
-    firstM: ['Lars', 'Henrik', 'Bjorn', 'Finn', 'Emil', 'Sindre'],
+    firstM: ['Lars', 'Henrik', 'Bjørn', 'Finn', 'Emil', 'Sindre'],
     firstF: ['Ingrid', 'Astrid', 'Freya', 'Maren', 'Solveig', 'Kari'],
     last: ['Halvorsen', 'Berg', 'Nilsen', 'Haugen', 'Dahl', 'Strand', 'Eriksen', 'Larsen'],
     hometowns: ['Oslo', 'Tromsø', 'Bergen', 'Trondheim'],
@@ -121,7 +121,7 @@ export const HERITAGES: Heritage[] = [
     id: 'german',
     country: 'Germany',
     flag: '🇩🇪',
-    firstM: ['Stefan', 'Tomas', 'Jonas', 'Felix', 'Lukas', 'Matthias'],
+    firstM: ['Stefan', 'Thomas', 'Jonas', 'Felix', 'Lukas', 'Matthias'],
     firstF: ['Greta', 'Anja', 'Lena', 'Clara', 'Birgit', 'Hanna'],
     last: ['Meyer', 'Weiss', 'Schneider', 'Fischer', 'Wagner', 'Keller', 'Brandt', 'Hofmann'],
     hometowns: ['Munich', 'Garmisch', 'Freiburg', 'Berchtesgaden'],
@@ -141,9 +141,9 @@ export const HERITAGES: Heritage[] = [
     id: 'french',
     country: 'France',
     flag: '🇫🇷',
-    firstM: ['Luc', 'Antoine', 'Julien', 'Pierre', 'Mathieu', 'Remy'],
-    firstF: ['Camille', 'Elise', 'Margaux', 'Amelie', 'Claire', 'Manon'],
-    last: ['Moreau', 'Lefevre', 'Girard', 'Chamoux', 'Blanc', 'Ravanel', 'Dubois', 'Perrin'],
+    firstM: ['Luc', 'Antoine', 'Julien', 'Pierre', 'Mathieu', 'Rémy'],
+    firstF: ['Camille', 'Élise', 'Margaux', 'Amélie', 'Claire', 'Manon'],
+    last: ['Moreau', 'Lefèvre', 'Girard', 'Chamoux', 'Blanc', 'Ravanel', 'Dubois', 'Perrin'],
     hometowns: ['Chamonix', 'Grenoble', 'Annecy', 'Briançon'],
     skinBand: [0, 2],
   },
@@ -151,8 +151,8 @@ export const HERITAGES: Heritage[] = [
     id: 'spanish',
     country: 'Spain',
     flag: '🇪🇸',
-    firstM: ['Diego', 'Mateo', 'Javier', 'Alvaro', 'Sergio', 'Pablo'],
-    firstF: ['Carmen', 'Rosa', 'Marta', 'Ines', 'Alba', 'Nuria'],
+    firstM: ['Diego', 'Mateo', 'Javier', 'Álvaro', 'Sergio', 'Pablo'],
+    firstF: ['Carmen', 'Rosa', 'Marta', 'Inés', 'Alba', 'Nuria'],
     last: ['Fernandez', 'Garcia', 'Lopez', 'Navarro', 'Serrano', 'Ortega', 'Molina', 'Iglesias'],
     hometowns: ['Granada', 'Huesca', 'Bilbao', 'Madrid'],
     skinBand: [0, 2],
@@ -194,7 +194,7 @@ export const HERITAGES: Heritage[] = [
     flag: '🇵🇱',
     firstM: ['Piotr', 'Marek', 'Tomasz', 'Jakub', 'Andrzej', 'Wojtek'],
     firstF: ['Wanda', 'Agnieszka', 'Kasia', 'Magda', 'Ola', 'Ewa'],
-    last: ['Kowalski', 'Nowak', 'Zawada', 'Mazur', 'Kaminski', 'Wisniewski', 'Urban', 'Sikora'],
+    last: ['Kowalski', 'Nowak', 'Zawada', 'Mazur', 'Kamiński', 'Wiśniewski', 'Urban', 'Sikora'],
     hometowns: ['Kraków', 'Zakopane', 'Wrocław', 'Gdańsk'],
     skinBand: [0, 1],
     feminizeLast: true,
@@ -206,7 +206,7 @@ export const HERITAGES: Heritage[] = [
     firstM: ['Callum', 'Rhys', 'Angus', 'Declan', 'Ewan', 'Owen'],
     firstF: ['Niamh', 'Isla', 'Bronwyn', 'Tamsin', 'Erin', 'Maeve'],
     last: ['Murray', 'Bell', 'Fraser', 'Llewellyn', 'Gallagher', 'Hartley', 'Kerr', 'Doyle'],
-    hometowns: ['Fort William', 'Sheffield', 'Llanberis', 'Galway'],
+    hometowns: ['Fort William', 'Sheffield', 'Llanberis', 'Keswick'],
     skinBand: [0, 1],
   },
   {
@@ -229,11 +229,17 @@ export const HERITAGES: Heritage[] = [
 export const SHERPA_HERITAGE = {
   country: 'Nepal',
   flag: '🇳🇵',
+  // Common day-names and given names only — no compounds that reproduce a
+  // famous individual's exact full name (a generated sirdar can appear on
+  // the memorial, and "Ang Rita Sherpa" is a real legend, not a character).
+  // Sirdars always get a generated second given name for the same reason.
   given: [
-    'Pasang', 'Lhakpa', 'Mingma', 'Nima', 'Pemba', 'Dawa', 'Phurba', 'Ang Dorje',
-    'Kami', 'Tashi', 'Chhiring', 'Norbu', 'Gyalzen', 'Ang Rita', 'Dorje',
-    'Sonam', 'Karma', 'Lobsang', 'Tsering', 'Jangbu',
+    'Pasang', 'Lhakpa', 'Mingma', 'Nima', 'Pemba', 'Dawa', 'Phurba',
+    'Kami', 'Tashi', 'Chhiring', 'Norbu', 'Gyalzen', 'Dorje',
+    'Sonam', 'Karma', 'Lobsang', 'Tsering', 'Jangbu', 'Nuru', 'Phinjo',
   ],
+  /** Given names in the bank that are not used for women. */
+  maleOnly: ['Norbu', 'Gyalzen', 'Dorje', 'Lobsang', 'Jangbu', 'Phinjo'],
   hometowns: ['Namche Bazaar', 'Khumjung', 'Phortse', 'Thame', 'Pangboche'],
   skinBand: [2, 3] as [number, number],
 };
@@ -269,7 +275,7 @@ const BIO_TEMPLATES = [
   'Ex-{job}. Sold the business, bought the permit.',
   '{quirk}. The squad stopped asking why.',
   'Two attempts on {peak}, both turned back by weather. This one is personal.',
-  'The calm one. {job} by trade; {quirk}.',
+  'The calm one — {job} by trade; {quirk}.',
   'From {hometown}; promised the family this is the last big one. Again.',
 ];
 
@@ -350,9 +356,11 @@ export function drawClimber(
   };
 }
 
-// Second given names for sirdar disambiguation past 20 teams — Sherpa
-// names are often compound (Ang Dorje, Ang Rita) so this reads naturally.
-const SHERPA_SECOND = ['Nuru', 'Gyalje', 'Tenji', 'Thundu', 'Chhiri'];
+// Second given names — Sherpa names are usually compound, and the pairing
+// keeps generated sirdars from matching any real famous climber's exact
+// full name.
+const SHERPA_SECOND_M = ['Gyalje', 'Tenji', 'Thundu', 'Chhiri', 'Dendi', 'Rinji'];
+const SHERPA_SECOND_F = ['Futi', 'Yangji', 'Chhiri', 'Doma', 'Diki'];
 
 /** Generate a sirdar from the Sherpa bank. */
 export function drawSirdar(
@@ -360,11 +368,16 @@ export function drawSirdar(
   givenName: string,
   usedNames: Set<string>,
 ): Climber {
-  const gender: 0 | 1 = rng() < 0.5 ? 0 : 1;
+  const gender: 0 | 1 = SHERPA_HERITAGE.maleOnly.includes(givenName)
+    ? 0
+    : rng() < 0.5
+      ? 0
+      : 1;
   const hometown = pick(rng, SHERPA_HERITAGE.hometowns);
-  let name = `${givenName} Sherpa`;
+  const seconds = gender === 1 ? SHERPA_SECOND_F : SHERPA_SECOND_M;
+  let name = `${givenName} ${pick(rng, seconds)} Sherpa`;
   for (let attempt = 0; usedNames.has(name) && attempt < 12; attempt++) {
-    name = `${givenName} ${pick(rng, SHERPA_SECOND)} Sherpa`;
+    name = `${givenName} ${pick(rng, seconds)} Sherpa`;
   }
   usedNames.add(name);
   return {

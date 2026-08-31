@@ -41,6 +41,8 @@ export interface JourneyTheme {
   finaleJumpLabel: string;
   /** results memorial heading; the memorial renders only when set and deaths exist */
   memorialTitle?: string;
+  /** finale alive-pips tooltip, e.g. "3 still climbing" */
+  stillActiveLabel?: (n: number) => string;
 }
 
 export const EVEREST_JOURNEY: JourneyTheme = {
@@ -89,4 +91,5 @@ export const EVEREST_JOURNEY: JourneyTheme = {
   },
   finaleJumpLabel: 'Summit push',
   memorialTitle: 'The mountain keeps them',
+  stillActiveLabel: (n) => `${n} still climbing`,
 };
