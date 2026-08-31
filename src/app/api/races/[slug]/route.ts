@@ -10,7 +10,7 @@ export async function GET(
   const { slug } = await params;
   const sinceRaw = new URL(req.url).searchParams.get('since');
   const since = sinceRaw === null ? undefined : Number(sinceRaw);
-  const view = getRaceView(
+  const view = await getRaceView(
     slug,
     Date.now(),
     since !== undefined && Number.isFinite(since) ? since : undefined,

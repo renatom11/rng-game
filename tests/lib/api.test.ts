@@ -21,7 +21,7 @@ beforeAll(() => resetDbForTests());
 afterAll(() => resetDbForTests());
 
 describe('race storage & spoiler-proof serving', () => {
-  it('validates input', () => {
+  it('validates input', async () => {
     expect(() => validateCreateInput({ teams: teams(1), durationMs: 60_000 }, NOW)).toThrow(ValidationError);
     expect(() => validateCreateInput({ teams: teams(51), durationMs: 60_000 }, NOW)).toThrow(ValidationError);
     expect(() => validateCreateInput({ teams: teams(4), durationMs: 30_000 }, NOW)).toThrow(ValidationError);
@@ -36,12 +36,12 @@ describe('race storage & spoiler-proof serving', () => {
     expect(ok.startAtMs).toBe(NOW + 60_000);
   });
 
-  it('scheduled races serve nothing but static config', () => {
-    const { slug } = createRace(
+  it('scheduled races serve nothing but static config', async () => {
+    const { slug } = await createRace(
       { teams: teams(6), durationMs: 600_000, title: 'Draft Night' },
       NOW,
     );
-    const view = getRaceView(slug, NOW + 1_000)!;
+    const view = (await getRaceView(slug, NOW + 1_000))!;
     expect(view.status).toBe('scheduled');
     expect(view.config.teams).toHaveLength(6);
     expect(view.snapshot.complete).toBe(false);
@@ -53,13 +53,13 @@ describe('race storage & spoiler-proof serving', () => {
     expect(view.snapshot.wipeouts).toHaveLength(0);
   });
 
-  it('mid-race truncation never leaks the future or the outcome', () => {
-    const { slug } = createRace(
+  it('mid-race truncation never leaks the future or the outcome', async () => {
+    const { slug } = await createRace(
       { teams: teams(8), durationMs: 600_000, startAtMs: NOW },
       NOW,
     );
     const midNow = NOW + 300_000; // halfway
-    const view = getRaceView(slug, midNow)!;
+    const view = (await getRaceView(slug, midNow))!;
     expect(view.status).toBe('running');
     const snap = view.snapshot;
     if (snap.theme !== 'everest') throw new Error('expected everest snapshot');
@@ -85,28 +85,28 @@ describe('race storage & spoiler-proof serving', () => {
     expect(json).not.toContain('"summitTimesMs"');
   });
 
-  it('pre-push horizons are hard-capped at the push start (no convergence data early)', () => {
+  it('pre-push horizons are hard-capped at the push start (no convergence data early)', async () => {
     const duration = 600_000;
-    const { slug } = createRace(
+    const { slug } = await createRace(
       { teams: teams(6), durationMs: duration, startAtMs: NOW },
       NOW,
     );
-    const view0 = getRaceView(slug, NOW)!;
+    const view0 = (await getRaceView(slug, NOW))!;
     const pushStart = view0.snapshot.pushStartMs;
     for (const elapsed of [0, 100_000, pushStart - 10_000, pushStart - 1]) {
-      const v = getRaceView(slug, NOW + elapsed)!;
+      const v = (await getRaceView(slug, NOW + elapsed))!;
       expect(v.snapshot.horizonMs).toBeLessThanOrEqual(pushStart);
       if (v.snapshot.theme !== 'everest') throw new Error('expected everest');
       expect(v.snapshot.wipeouts).toHaveLength(0); // wipes are all post-push
     }
   });
 
-  it('a minimum-duration race no longer serves its whole timeline at t=0', () => {
-    const { slug } = createRace(
+  it('a minimum-duration race no longer serves its whole timeline at t=0', async () => {
+    const { slug } = await createRace(
       { teams: teams(6), durationMs: 60_000, startAtMs: NOW },
       NOW,
     );
-    const v = getRaceView(slug, NOW + 100)!;
+    const v = (await getRaceView(slug, NOW + 100))!;
     expect(v.status).toBe('running');
     const snap = v.snapshot;
     if (snap.theme !== 'everest') throw new Error('expected everest');
@@ -120,24 +120,24 @@ describe('race storage & spoiler-proof serving', () => {
     }
   });
 
-  it('push-phase lookahead is a few seconds, not the finale', () => {
+  it('push-phase lookahead is a few seconds, not the finale', async () => {
     const duration = 600_000;
-    const { slug } = createRace(
+    const { slug } = await createRace(
       { teams: teams(6), durationMs: duration, startAtMs: NOW },
       NOW,
     );
-    const pushStart = getRaceView(slug, NOW)!.snapshot.pushStartMs;
+    const pushStart = (await getRaceView(slug, NOW))!.snapshot.pushStartMs;
     const elapsed = pushStart + 5_000;
-    const v = getRaceView(slug, NOW + elapsed)!;
+    const v = (await getRaceView(slug, NOW + elapsed))!;
     expect(v.snapshot.horizonMs).toBe(
       Math.min(duration, elapsed + pushLookaheadMs(duration)),
     );
     expect(horizonFor(elapsed, duration, pushStart)).toBe(v.snapshot.horizonMs);
   });
 
-  it('olympics: marquee result keyframes never ship early', () => {
+  it('olympics: marquee result keyframes never ship early', async () => {
     const duration = 300_000;
-    const { slug } = createRace(
+    const { slug } = await createRace(
       {
         teams: teams(6),
         durationMs: duration,
@@ -147,11 +147,11 @@ describe('race storage & spoiler-proof serving', () => {
       NOW,
     );
     // Pre-push: no marquee keyframes at all (they all end after pushStart).
-    const pre = getRaceView(slug, NOW + 200_000)!;
+    const pre = (await getRaceView(slug, NOW + 200_000))!;
     if (pre.snapshot.theme !== 'olympics') throw new Error('expected olympics');
     expect(pre.snapshot.horizonMs).toBeLessThanOrEqual(pre.snapshot.pushStartMs);
     // At 90% elapsed the closing keyframe (99.5%) is still unserved.
-    const late = getRaceView(slug, NOW + duration * 0.9)!;
+    const late = (await getRaceView(slug, NOW + duration * 0.9))!;
     if (late.snapshot.theme !== 'olympics') throw new Error('expected olympics');
     const maxServed = Math.max(
       0,
@@ -161,12 +161,12 @@ describe('race storage & spoiler-proof serving', () => {
     expect(JSON.stringify(late)).not.toContain('"finalOrder"');
   });
 
-  it('finished races disclose everything', () => {
-    const { slug } = createRace(
+  it('finished races disclose everything', async () => {
+    const { slug } = await createRace(
       { teams: teams(5), durationMs: 600_000, startAtMs: NOW },
       NOW,
     );
-    const view = getRaceView(slug, NOW + 600_001)!;
+    const view = (await getRaceView(slug, NOW + 600_001))!;
     expect(view.status).toBe('finished');
     expect(view.snapshot.complete).toBe(true);
     expect(view.snapshot.finalOrder).toHaveLength(5);
@@ -176,29 +176,29 @@ describe('race storage & spoiler-proof serving', () => {
     expect(lastEvent.type).toBe('race_finish');
   });
 
-  it('demo races are fully disclosed from the start', () => {
-    const { slug } = createRace(
+  it('demo races are fully disclosed from the start', async () => {
+    const { slug } = await createRace(
       { teams: teams(4), durationMs: 600_000, demo: true },
       NOW,
     );
-    const view = getRaceView(slug, NOW + 1_000)!;
+    const view = (await getRaceView(slug, NOW + 1_000))!;
     expect(view.config.demo).toBe(true);
     expect(view.snapshot.complete).toBe(true);
     expect(view.snapshot.finalOrder).toHaveLength(4);
   });
 
-  it('unknown slug returns null', () => {
-    expect(getRaceView('nope-nope', NOW)).toBeNull();
+  it('unknown slug returns null', async () => {
+    expect(await getRaceView('nope-nope', NOW)).toBeNull();
   });
 
-  it('grid/meters/events lengths are consistent as the horizon advances', () => {
-    const { slug } = createRace(
+  it('grid/meters/events lengths are consistent as the horizon advances', async () => {
+    const { slug } = await createRace(
       { teams: teams(6), durationMs: 300_000, startAtMs: NOW },
       NOW,
     );
     let prevEvents = -1;
     for (const dt of [30_000, 90_000, 150_000, 240_000]) {
-      const v = getRaceView(slug, NOW + dt)!;
+      const v = (await getRaceView(slug, NOW + dt))!;
       if (v.snapshot.theme !== 'everest') throw new Error('expected everest');
       expect(v.snapshot.events.length).toBeGreaterThanOrEqual(prevEvents);
       prevEvents = v.snapshot.events.length;

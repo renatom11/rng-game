@@ -1,0 +1,27 @@
+{
+  // Summit on Cloudflare Workers (via @opennextjs/cloudflare) with D1.
+  // Before first deploy: create the database and paste its id below —
+  //   npx wrangler d1 create summit
+  // then apply the schema:
+  //   npm run migrate:cf
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "summit",
+  "main": ".open-next/worker.js",
+  "compatibility_date": "2025-03-25",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS"
+  },
+  "d1_databases": [
+    {
+      "binding": "SUMMIT_DB",
+      "database_name": "summit",
+      "database_id": "REPLACE_WITH_YOUR_D1_DATABASE_ID",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "observability": {
+    "enabled": true
+  }
+}

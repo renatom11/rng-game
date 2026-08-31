@@ -19,7 +19,7 @@ beforeAll(() => resetDbForTests());
 afterAll(() => resetDbForTests());
 
 describe('recovery codes', () => {
-  it('round-trips and rejects tampering', () => {
+  it('round-trips and rejects tampering', async () => {
     const payload = {
       v: 1 as const,
       slug: 'abc123def4',
@@ -40,36 +40,36 @@ describe('recovery codes', () => {
     expect(() => decodeRaceCode('hello')).toThrow(RaceCodeError);
   });
 
-  it('restores a crashed race byte-identically, same slug, mid-flight', () => {
-    const { slug, recoveryCode } = createRace(
+  it('restores a crashed race byte-identically, same slug, mid-flight', async () => {
+    const { slug, recoveryCode } = await createRace(
       { teams: teams(6), durationMs: 3_600_000, startAtMs: NOW + 60_000, title: 'Crash Test' },
       NOW,
     );
     const midRace = NOW + 60_000 + 1_200_000;
-    const before = getRaceView(slug, midRace);
+    const before = await getRaceView(slug, midRace);
     expect(before).not.toBeNull();
 
     // The server burns down.
     resetDbForTests();
-    expect(getRaceView(slug, midRace)).toBeNull();
+    expect(await getRaceView(slug, midRace)).toBeNull();
 
     // The host pastes the code — restore is exact and lands mid-race.
-    const restored = restoreRace(recoveryCode, midRace);
+    const restored = await restoreRace(recoveryCode, midRace);
     expect(restored.slug).toBe(slug);
     expect(restored.existed).toBe(false);
-    const after = getRaceView(slug, midRace);
+    const after = await getRaceView(slug, midRace);
     expect(after).not.toBeNull();
     expect(after!.startAt).toBe(before!.startAt);
     expect(after!.status).toBe('running');
     expect(JSON.stringify(after!.snapshot)).toBe(JSON.stringify(before!.snapshot));
 
     // Restoring again is a no-op.
-    expect(restoreRace(recoveryCode, midRace).existed).toBe(true);
+    expect((await restoreRace(recoveryCode, midRace)).existed).toBe(true);
   });
 });
 
 describe('live height order', () => {
-  it('pre-push: sorted by display position; wiped teams sink', () => {
+  it('pre-push: sorted by display position; wiped teams sink', async () => {
     const t = generateEverest('height-1', { teams: teams(8), durationMs: 1_800_000 });
     const snap = toJourneySnapshot('everest', t, 1_800_000, { complete: true });
     const at = 0.5 * 1_800_000;

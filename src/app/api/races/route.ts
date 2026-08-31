@@ -11,7 +11,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'invalid JSON' }, { status: 400 });
   }
   try {
-    const { slug, recoveryCode } = createRace(
+    const { slug, recoveryCode } = await createRace(
       body as Parameters<typeof createRace>[0],
       Date.now(),
     );

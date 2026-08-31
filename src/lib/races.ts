@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { getDb } from './db';
+import { getStorage } from './storage';
 import { deriveStatus, type RaceStatus } from './time';
 import {
   toJourneySnapshot,
@@ -123,29 +123,24 @@ function generateTimeline(
       : generateEverest(seed, { teams, durationMs });
 }
 
-export function createRace(
+export async function createRace(
   input: CreateRaceInput,
   nowMs: number,
-): { slug: string; recoveryCode: string } {
+): Promise<{ slug: string; recoveryCode: string }> {
   const { config, durationMs, startAtMs } = validateCreateInput(input, nowMs);
   const seed = crypto.randomBytes(16).toString('hex');
   const timeline = generateTimeline(config.theme, seed, config.teams, durationMs);
   const slug = newSlug();
-  getDb()
-    .prepare(
-      `INSERT INTO races (id, theme, seed, config_json, timeline_json, created_at, start_at, duration_ms)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    )
-    .run(
-      slug,
-      config.theme,
-      seed,
-      JSON.stringify(config),
-      JSON.stringify(timeline),
-      nowMs,
-      startAtMs,
-      durationMs,
-    );
+  await (await getStorage()).insert({
+    id: slug,
+    theme: config.theme,
+    seed,
+    config_json: JSON.stringify(config),
+    timeline_json: JSON.stringify(timeline),
+    created_at: nowMs,
+    start_at: startAtMs,
+    duration_ms: durationMs,
+  });
   const recoveryCode = encodeRaceCode({
     v: 1,
     slug,
@@ -168,14 +163,15 @@ export function createRace(
  * outcome, identical story, picked up at exactly the right point in time.
  * Idempotent: restoring a race that already exists is a no-op.
  */
-export function restoreRace(
+export async function restoreRace(
   code: string,
   nowMs: number,
-): { slug: string; existed: boolean } {
+): Promise<{ slug: string; existed: boolean }> {
   const p = decodeRaceCode(code);
-  const db = getDb();
-  const existing = db.prepare('SELECT id FROM races WHERE id = ?').get(p.slug);
-  if (existing) return { slug: p.slug, existed: true };
+  const storage = await getStorage();
+  // Existence check FIRST — regeneration is ~100ms of CPU, and restore is
+  // unauthenticated; a known code must never trigger repeated generation.
+  if (await storage.exists(p.slug)) return { slug: p.slug, existed: true };
 
   // Re-validate the embedded config with the code's own start time as "now"
   // — a restored race is allowed (expected!) to have started in the past.
@@ -191,19 +187,16 @@ export function restoreRace(
     p.startAtMs,
   );
   const timeline = generateTimeline(config.theme, p.seed, config.teams, durationMs);
-  db.prepare(
-    `INSERT INTO races (id, theme, seed, config_json, timeline_json, created_at, start_at, duration_ms)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).run(
-    p.slug,
-    config.theme,
-    p.seed,
-    JSON.stringify(config),
-    JSON.stringify(timeline),
-    p.createdAt ?? nowMs,
-    startAtMs,
-    durationMs,
-  );
+  await storage.insert({
+    id: p.slug,
+    theme: config.theme,
+    seed: p.seed,
+    config_json: JSON.stringify(config),
+    timeline_json: JSON.stringify(timeline),
+    created_at: p.createdAt ?? nowMs,
+    start_at: startAtMs,
+    duration_ms: durationMs,
+  });
   return { slug: p.slug, existed: false };
 }
 
@@ -217,23 +210,12 @@ export interface RaceView {
   snapshot: PublicSnapshot;
 }
 
-export function getRaceView(
+export async function getRaceView(
   slug: string,
   nowMs: number,
   sinceMs?: number,
-): RaceView | null {
-  const row = getDb()
-    .prepare('SELECT * FROM races WHERE id = ?')
-    .get(slug) as
-    | {
-        id: string;
-        theme: string;
-        config_json: string;
-        timeline_json: string;
-        start_at: number;
-        duration_ms: number;
-      }
-    | undefined;
+): Promise<RaceView | null> {
+  const row = await (await getStorage()).get(slug);
   if (!row) return null;
 
   const config = JSON.parse(row.config_json) as RaceConfigStored;

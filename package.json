@@ -8,7 +8,11 @@
     "start": "next start",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "build:cf": "opennextjs-cloudflare build",
+    "preview:cf": "opennextjs-cloudflare build && wrangler dev",
+    "deploy:cf": "opennextjs-cloudflare build && opennextjs-cloudflare deploy",
+    "migrate:cf": "wrangler d1 migrations apply SUMMIT_DB --remote"
   },
   "dependencies": {
     "better-sqlite3": "^11.10.0",
@@ -17,11 +21,13 @@
     "react-dom": "^19.1.0"
   },
   "devDependencies": {
+    "@opennextjs/cloudflare": "^1.20.5",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^22.15.0",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
     "typescript": "^5.8.3",
-    "vitest": "^3.1.4"
+    "vitest": "^3.1.4",
+    "wrangler": "^4.127.1"
   }
 }

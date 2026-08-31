@@ -16,7 +16,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'paste a recovery code' }, { status: 400 });
   }
   try {
-    const { slug, existed } = restoreRace(code, Date.now());
+    const { slug, existed } = await restoreRace(code, Date.now());
     return NextResponse.json({ slug, url: `/r/${slug}`, existed });
   } catch (err) {
     if (err instanceof RaceCodeError || err instanceof ValidationError) {
