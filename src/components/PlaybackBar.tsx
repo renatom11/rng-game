@@ -8,6 +8,7 @@ interface Props {
   tMs: number;
   durationMs: number;
   pushStartMs: number;
+  finaleLabel: string;
   playing: boolean;
   speed: number;
   setPlaying: (p: boolean) => void;
@@ -16,7 +17,7 @@ interface Props {
 }
 
 export function PlaybackBar({
-  tMs, durationMs, pushStartMs, playing, speed, setPlaying, setSpeed, scrubTo,
+  tMs, durationMs, pushStartMs, finaleLabel, playing, speed, setPlaying, setSpeed, scrubTo,
 }: Props) {
   return (
     <div className="playback">
@@ -52,9 +53,9 @@ export function PlaybackBar({
       <button
         className="playback-jump"
         onClick={() => scrubTo(Math.max(0, pushStartMs - durationMs * 0.005))}
-        title="Jump to the summit push"
+        title="Jump to the decisive final act"
       >
-        Summit push →
+        {finaleLabel} →
       </button>
     </div>
   );

@@ -131,6 +131,7 @@ export function RaceClient({ slug }: { slug: string }) {
           tMs={tMs}
           durationMs={durationMs}
           pushStartMs={snap.pushStartMs}
+          finaleLabel={snap.theme === 'olympics' ? 'Closing marquee' : 'Summit push'}
           playing={clock.playback.playing}
           speed={clock.playback.speed}
           setPlaying={clock.setPlaying}

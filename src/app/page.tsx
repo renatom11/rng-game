@@ -4,33 +4,41 @@ import Link from 'next/link';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 
-const DEMO_TEAMS = [
+const DEMO_EVEREST = [
   'The Yak Attack', 'Crampon Gang', 'Sherpa Tensing', 'Altitude Adjusted',
   'The Icefall Guys', 'Peak Performance', 'Oxygen Debt', 'Cornice Riders',
 ];
 
+const DEMO_OLYMPICS = [
+  'Norwegia', 'Atlantis', 'Kingdom of Zeal', 'Freedonia',
+  'Wakanda', 'Genovia', 'Latveria', 'Elbonia',
+];
+
 export default function Home() {
   const router = useRouter();
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<string | null>(null);
 
-  const watchDemo = async () => {
-    setBusy(true);
+  const watchDemo = async (theme: 'everest' | 'olympics') => {
+    setBusy(theme);
     try {
       const res = await fetch('/api/races', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
-          title: 'Demo Expedition',
-          teams: DEMO_TEAMS.map((name) => ({ name })),
+          theme,
+          title: theme === 'olympics' ? 'Demo Games' : 'Demo Expedition',
+          teams: (theme === 'olympics' ? DEMO_OLYMPICS : DEMO_EVEREST).map(
+            (name) => ({ name }),
+          ),
           durationMs: 600_000,
           demo: true,
         }),
       });
       const data = await res.json();
       if (res.ok) router.push(data.url);
-      else setBusy(false);
+      else setBusy(null);
     } catch {
-      setBusy(false);
+      setBusy(null);
     }
   };
 
@@ -40,16 +48,28 @@ export default function Home() {
         <p className="landing-kicker">A very grand way to sort a list</p>
         <h1 className="landing-title">SUMMIT</h1>
         <p className="landing-tag">
-          Draft order. Chore duty. Who goes first. Give every name a mountain
-          expedition, race them up Everest for anywhere from a minute to eight
-          hours, and let the summit decide — provably fair, gloriously dramatic.
+          Draft order. Chore duty. Who goes first. Give every name an Everest
+          expedition or an Olympic delegation, race them for anywhere from a
+          minute to eight hours, and let the ending decide — provably fair,
+          gloriously dramatic.
         </p>
         <div className="landing-ctas">
           <Link className="cta" href="/new">
-            Plan an expedition
+            Create a race
           </Link>
-          <button className="cta cta-ghost" onClick={watchDemo} disabled={busy}>
-            {busy ? 'Preparing…' : 'Watch a 10-minute demo'}
+          <button
+            className="cta cta-ghost"
+            onClick={() => watchDemo('everest')}
+            disabled={busy !== null}
+          >
+            {busy === 'everest' ? 'Preparing…' : '🏔 Everest demo'}
+          </button>
+          <button
+            className="cta cta-ghost"
+            onClick={() => watchDemo('olympics')}
+            disabled={busy !== null}
+          >
+            {busy === 'olympics' ? 'Preparing…' : '🏅 Olympics demo'}
           </button>
         </div>
       </div>
@@ -60,13 +80,13 @@ export default function Home() {
           odds.
         </li>
         <li>
-          <strong>Check in any time.</strong> Share one link. Rotations,
-          storms, oxygen counts, route gambles — there&apos;s always something
-          happening on the mountain.
+          <strong>Check in any time.</strong> Share one link. Rotations, storms,
+          oxygen counts, route gambles, medal tables — there&apos;s always
+          something happening.
         </li>
         <li>
           <strong>Undecided until the end.</strong> Every place stays within
-          reach until the summit push. The server won&apos;t even tell your
+          reach until the final act. The server won&apos;t even tell your
           browser the ending — it literally can&apos;t be spoiled.
         </li>
       </ul>
