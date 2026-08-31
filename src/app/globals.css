@@ -1,0 +1,34 @@
+:root {
+  --bg: #070c16;
+  --bg-raised: #0d1524;
+  --bg-panel: #111c30;
+  --line: #1d2c47;
+  --snow: #eef3fb;
+  --snow-dim: #9fb0c9;
+  --ice: #7fd4ff;
+  --gold: #f4c95d;
+  --danger: #ff6b5e;
+  --safe: #7fd4ff;
+  --risky: #ffb347;
+  --font-display: Georgia, 'Palatino Linotype', Palatino, serif;
+  --font-body: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica,
+    Arial, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--snow);
+  font-family: var(--font-body);
+  min-height: 100%;
+}
+
+a {
+  color: var(--ice);
+}
