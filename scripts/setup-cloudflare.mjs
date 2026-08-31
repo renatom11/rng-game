@@ -246,12 +246,20 @@ async function main() {
 
   /* 4. deploy ------------------------------------------------------------ */
   step('Building and deploying the Worker (a minute or two)');
-  // Interactive: a first deploy on a fresh account has to ask which
-  // workers.dev subdomain to register, and that prompt never appears if we
-  // are capturing stdout — so the deploy would answer for you and fail.
-  const deploy = await run(NPM, ['run', 'deploy:cf'], { interactive: true });
-  if (deploy.code !== 0) die('The deploy failed — the output above says why.');
-  const liveUrl = findLiveUrl();
+  // Capture first, so the deployed URL can be read out of wrangler's output
+  // and shown at the end. If that fails it may be because wrangler needed to
+  // ask something (it suppresses all prompts when stdout is a pipe — a fresh
+  // account has to choose a workers.dev subdomain), so retry with the real
+  // terminal attached. Deploys are idempotent, so a second run is safe.
+  let deploy = await run(NPM, ['run', 'deploy:cf']);
+  if (deploy.code !== 0) {
+    note('retrying with the terminal attached, in case wrangler needs to ask you something');
+    deploy = await run(NPM, ['run', 'deploy:cf'], { interactive: true });
+    if (deploy.code !== 0) die('The deploy failed — the output above says why.');
+  }
+  const liveUrl =
+    (deploy.out.match(/https:\/\/[a-z0-9-]+\.[a-z0-9-]+\.workers\.dev/gi) ?? []).pop() ??
+    findLiveUrl();
   ok(liveUrl ? `deployed to ${liveUrl}` : 'deployed — your URL is in the output above');
 
   /* 5. signing secret ---------------------------------------------------- */
@@ -293,7 +301,12 @@ async function main() {
 
   /* summary -------------------------------------------------------------- */
   console.log(bold('\n\nDone.\n'));
-  if (liveUrl) console.log(`  Your site:   ${bold(liveUrl)}`);
+  if (liveUrl) {
+    console.log(`  Your site:   ${bold(liveUrl)}`);
+  } else {
+    console.log('  Your site:   scroll up to the line starting "Deployed summit triggers" —');
+    console.log('               the https://…workers.dev address just under it is yours.');
+  }
   console.log(`  Custom domain: dashboard → the summit Worker → Settings → Domains & Routes.`);
   console.log('');
   console.log('  To make every git push deploy automatically (optional — you can');
