@@ -356,7 +356,7 @@ describe('sponsored squads', () => {
     }
   });
 
-  it('the mountain is dangerous but not a massacre, and deaths spread through the race', () => {
+  it('the mountain is brutal but bounded, and deaths spread through the race', () => {
     let total = 0;
     let racesWith = 0;
     const thirds = new Set<number>();
@@ -370,9 +370,9 @@ describe('sponsored squads', () => {
       for (const d of deaths) thirds.add(Math.min(2, Math.floor((d.tMs / DUR) * 3)));
     }
     const mean = total / runs.length;
-    expect(mean).toBeGreaterThanOrEqual(2);
-    expect(mean).toBeLessThanOrEqual(8);
-    expect(racesWith / runs.length).toBeGreaterThanOrEqual(0.75);
+    expect(mean).toBeGreaterThanOrEqual(7);
+    expect(mean).toBeLessThanOrEqual(14);
+    expect(racesWith / runs.length).toBeGreaterThanOrEqual(0.9);
     expect(thirds.size).toBeGreaterThanOrEqual(2);
   });
 

@@ -197,12 +197,13 @@ export function buildFate(
   const injuries: FatePlan['injuries'] = [];
   const turnedBack: FatePlan['turnedBack'] = [];
 
-  // Wipe count: rare, and only with enough teams that "last place = lost on
-  // the mountain" doesn't dominate small races.
+  // Wipe count: only with enough teams that "last place = lost on the
+  // mountain" doesn't dominate small races. Brutal tuning: a quarter of
+  // races lose an expedition whole.
   const r = rng();
   let wipeCount = 0;
-  if (nTeams >= 4 && r < 0.1) wipeCount = 1;
-  if (nTeams >= 6 && r < 0.02) wipeCount = 2;
+  if (nTeams >= 4 && r < 0.25) wipeCount = 1;
+  if (nTeams >= 6 && r < 0.08) wipeCount = 2;
 
   const firstSummit = Math.min(...core.summitTimesMs);
   for (let k = 0; k < wipeCount; k++) {
@@ -234,11 +235,13 @@ export function buildFate(
       }
       continue;
     }
-    // Non-wiped teams: falls are dramatic but leave at least 2 climbing
-    // (or 1, rarely — the lone-survivor summit is legendary).
+    // Non-wiped teams: brutal — most squads bleed, and the lone-survivor
+    // summit (everyone else gone, one climber carries the flag up) is a
+    // recurring legend rather than a rarity. At least one climber always
+    // remains to finish.
     let maxFalls = Math.max(0, size - 2);
-    if (rng() < 0.08) maxFalls = size - 1;
-    const nFalls = weightedPick(rng, [0, 1, 2], [0.46, 0.38, 0.16]);
+    if (rng() < 0.25) maxFalls = size - 1;
+    const nFalls = weightedPick(rng, [0, 1, 2, 3], [0.15, 0.4, 0.3, 0.15]);
     const actual = Math.min(nFalls, maxFalls);
     for (let f = 0; f < actual; f++) {
       // Falls cluster where it's dangerous: icefall early, faces late.
