@@ -12,21 +12,36 @@ write (`src/lib/schema.ts`), so a brand-new database just works. The files in
 `migrations/` carry the same statements for anyone who prefers to apply them
 explicitly.
 
-## The fast path — one command
+## From a fresh copy to a live site
 
-```bash
-npm run setup:cf
-```
+Download or clone the project, then run **one** thing in that folder:
 
-It logs you into Cloudflare (one browser prompt), finds or creates the
-`summit` D1 database, writes its id into `wrangler.jsonc`, builds and deploys
-the Worker, generates and stores the recovery-code signing secret, and checks
-that the live URL actually answers. It is safe to re-run at any time — every
-step detects work that is already done and skips it.
+| | |
+| --- | --- |
+| Windows | double-click `setup.cmd`, or run `.\setup.cmd` |
+| macOS / Linux | `./setup.sh` |
+| any platform | `npm run setup:cf` |
+
+The only prerequisite is **Node 22.13 or newer** (get the LTS from
+[nodejs.org](https://nodejs.org)); the script checks and says so if not.
+Nothing in this project compiles from source, so there is no build toolchain
+to install and no native module that can fail — even the SQLite used for
+local development is Node's own built-in one.
+
+The script installs dependencies, logs you into Cloudflare (one browser
+prompt — the single moment it needs you), finds or creates the `summit` D1
+database, writes its id into `wrangler.jsonc`, builds and deploys the Worker,
+generates and stores the recovery-code signing secret, and then fetches the
+live URL to confirm it answers. It is safe to re-run at any time: every step
+detects work already done and skips it.
 
 When it finishes you have a live site at
-`https://summit.<your-subdomain>.workers.dev`. Commit the one-line
-`wrangler.jsonc` change it makes so CI deploys against the same database.
+`https://summit.<your-subdomain>.workers.dev`. The build-and-deploy step is
+the slow one — a quiet minute or two before the URL appears.
+
+The Windows launcher calls `node` directly, so PowerShell's default
+script-execution policy (which blocks npm's `.ps1` shim, and is the first
+thing a Windows user otherwise trips over) never comes into it.
 
 ## The no-terminal path
 
@@ -85,8 +100,10 @@ npm run migrate:cf     # optional — the app creates its own tables anyway
 - The Node/VPS path still works unchanged (`npm run build && npm start` with
   `SUMMIT_DB_PATH` on a disk) — the storage seam picks the right driver by
   environment.
-- `better-sqlite3` is an **optional** dependency, used only by that Node
-  path. It is a native module, so on a machine with no prebuilt binary for
-  its Node version and no C++ toolchain it simply will not install — and
-  nothing breaks: the build, the deploy, and the running site never touch
-  it, because Cloudflare uses D1. (`npm test` and `npm run dev` do need it.)
+- **Nothing compiles on install.** Local storage uses Node's built-in
+  `node:sqlite` rather than a native npm module, so there is no C++
+  toolchain, no prebuilt-binary lottery, and nothing that can fail on a
+  fresh clone. Do not "fix" an install with `--omit=optional`: that flag is
+  tree-wide, and esbuild, workerd and ast-grep all ship their per-platform
+  binaries as optional dependencies, so it produces a toolchain that cannot
+  run.

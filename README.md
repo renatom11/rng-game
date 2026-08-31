@@ -93,14 +93,17 @@ npm test           # engine + theme + API test suite (fairness, convergence, lea
 npm run build && npm start   # production
 ```
 
-The SQLite database lives at `./data/summit.db` by default
+Needs **Node 22.13+** and nothing else: local storage uses Node's built-in
+`node:sqlite`, so no dependency compiles from source and there is no build
+toolchain to install. The database lives at `./data/summit.db` by default
 (`SUMMIT_DB_PATH` overrides; rows are immutable, status is derived from the
 clock, and both drivers create their own tables — nothing to migrate).
 
-To put it online, `npm run setup:cf` deploys it to the **Cloudflare Workers
-free tier** in one command (D1 database, signing secret, live URL and all) —
-see [DEPLOY.md](./DEPLOY.md). A single persistent Node server
-(`npm run build && npm start`) works just as well.
+To put it online, one command in a fresh copy deploys it to the **Cloudflare
+Workers free tier** — D1 database, signing secret, live URL and all:
+double-click `setup.cmd` on Windows, `./setup.sh` on macOS and Linux, or
+`npm run setup:cf` anywhere. See [DEPLOY.md](./DEPLOY.md). A single
+persistent Node server (`npm run build && npm start`) works just as well.
 
 ## Architecture
 

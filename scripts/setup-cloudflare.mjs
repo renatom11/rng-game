@@ -123,6 +123,15 @@ const nameOf = (d) => d?.name ?? d?.database_name;
 async function main() {
   console.log(bold('\n🏔  Summit → Cloudflare (free tier)\n'));
 
+  // Fail here, clearly, rather than three steps later inside a build.
+  const [major, minor] = process.versions.node.split('.').map(Number);
+  if (major < 22 || (major === 22 && minor < 13)) {
+    die(
+      `Summit needs Node 22.13 or newer — this is ${process.version}.`,
+      'Install the current LTS from https://nodejs.org, then run this again.',
+    );
+  }
+
   /* 0. dependencies ----------------------------------------------------- */
   if (!existsSync(path.join(ROOT, 'node_modules', 'wrangler'))) {
     step('Installing dependencies');

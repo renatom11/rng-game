@@ -2,8 +2,8 @@
  * Storage seam v2 for the chunk protocol: one tiny async interface, two
  * drivers.
  *
- * - Node (dev, tests, self-hosted): better-sqlite3, loaded lazily so the
- *   native module never reaches Workers.
+ * - Node (dev, tests, self-hosted): Node's built-in SQLite, loaded lazily
+ *   so nothing SQLite-shaped ever reaches Workers.
  * - Cloudflare Workers: D1 bound as SUMMIT_DB — where every operation is
  *   row I/O and string passing, comfortably inside the free tier's CPU cap.
  *
@@ -163,7 +163,7 @@ function d1Storage(db: D1Like): RaceStorage {
   };
 }
 
-/* ---------------- Node / better-sqlite3 driver --------------------------- */
+/* ---------------- Node / built-in SQLite driver -------------------------- */
 
 let nodeStorage: RaceStorage | null = null;
 
@@ -188,27 +188,39 @@ async function getNodeStorage(): Promise<RaceStorage> {
     },
     async putTimeline(id, chunks, finalsBody) {
       const db = await getDb();
-      const tx = db.transaction(() => {
+      db.exec('BEGIN');
+      try {
         const insert = db.prepare(
           'INSERT INTO race_chunks (race_id, idx, from_ms, to_ms, body) VALUES (?, ?, ?, ?, ?)',
         );
         for (const c of chunks) insert.run(id, c.idx, c.fromMs, c.toMs, c.body);
         db.prepare('INSERT INTO race_finals (race_id, body) VALUES (?, ?)').run(id, finalsBody);
         db.prepare('UPDATE race_meta SET ready = 1 WHERE id = ?').run(id);
-      });
-      tx();
+        db.exec('COMMIT');
+      } catch (err) {
+        try {
+          db.exec('ROLLBACK');
+        } catch {
+          // the transaction is already gone; report the original failure
+        }
+        throw err;
+      }
     },
     async getChunks(id, afterIdx, maxToMs) {
       const db = await getDb();
-      return maxToMs === null
-        ? (db
-            .prepare('SELECT idx, body FROM race_chunks WHERE race_id = ? AND idx > ? ORDER BY idx')
-            .all(id, afterIdx) as StoredChunk[])
-        : (db
-            .prepare(
-              'SELECT idx, body FROM race_chunks WHERE race_id = ? AND idx > ? AND to_ms <= ? ORDER BY idx',
-            )
-            .all(id, afterIdx, maxToMs) as StoredChunk[]);
+      return (
+        maxToMs === null
+          ? db
+              .prepare(
+                'SELECT idx, body FROM race_chunks WHERE race_id = ? AND idx > ? ORDER BY idx',
+              )
+              .all(id, afterIdx)
+          : db
+              .prepare(
+                'SELECT idx, body FROM race_chunks WHERE race_id = ? AND idx > ? AND to_ms <= ? ORDER BY idx',
+              )
+              .all(id, afterIdx, maxToMs)
+      ) as StoredChunk[];
     },
     async getFinals(id) {
       const row = (await getDb()).prepare('SELECT body FROM race_finals WHERE race_id = ?').get(id) as
