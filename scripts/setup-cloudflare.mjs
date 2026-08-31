@@ -26,6 +26,10 @@ const PLACEHOLDER = 'REPLACE_WITH_YOUR_D1_DATABASE_ID';
 const DB_NAME = 'summit';
 const SECRET_NAME = 'SUMMIT_CODE_SECRET';
 const IS_WIN = process.platform === 'win32';
+// On Windows the bare names resolve to PowerShell shims that an execution
+// policy can block; the .cmd wrappers always run (and need shell: true).
+const NPM = IS_WIN ? 'npm.cmd' : 'npm';
+const NPX = IS_WIN ? 'npx.cmd' : 'npx';
 const ENV = { ...process.env, WRANGLER_SEND_METRICS: 'false' };
 
 let stepNo = 0;
@@ -83,8 +87,8 @@ function capture(cmd, args) {
   return { code: res.status ?? 1, out: `${res.stdout ?? ''}${res.stderr ?? ''}` };
 }
 
-const wrangler = (args, opts) => run('npx', ['wrangler', ...args], opts);
-const wranglerQuiet = (args) => capture('npx', ['wrangler', ...args]);
+const wrangler = (args, opts) => run(NPX, ['wrangler', ...args], opts);
+const wranglerQuiet = (args) => capture(NPX, ['wrangler', ...args]);
 
 /** Wrangler prints banners and warnings around its JSON; find the payload. */
 function parseJsonLoose(text) {
@@ -122,7 +126,7 @@ async function main() {
   /* 0. dependencies ----------------------------------------------------- */
   if (!existsSync(path.join(ROOT, 'node_modules', 'wrangler'))) {
     step('Installing dependencies');
-    const { code } = await run('npm', ['install']);
+    const { code } = await run(NPM, ['install']);
     if (code !== 0) die('npm install failed.');
     ok('dependencies installed');
   }
@@ -176,7 +180,7 @@ async function main() {
 
   /* 4. deploy ------------------------------------------------------------ */
   step('Building and deploying the Worker (a minute or two)');
-  const deploy = await run('npm', ['run', 'deploy:cf']);
+  const deploy = await run(NPM, ['run', 'deploy:cf']);
   if (deploy.code !== 0) die('The deploy failed — the output above says why.');
   const urls = deploy.out.match(/https:\/\/[a-z0-9._-]+\.workers\.dev/gi) ?? [];
   const liveUrl = urls[urls.length - 1] ?? null;
@@ -189,7 +193,7 @@ async function main() {
     ok(`${SECRET_NAME} is already set — leaving it as it is`);
   } else {
     const value = randomBytes(32).toString('base64url');
-    const { code } = await run('npx', ['wrangler', 'secret', 'put', SECRET_NAME], { input: value });
+    const { code } = await run(NPX, ['wrangler', 'secret', 'put', SECRET_NAME], { input: value });
     if (code !== 0) {
       note(`Could not set ${SECRET_NAME} automatically.`);
       note(`Add it by hand: dashboard → the summit Worker → Settings → Variables and Secrets.`);
@@ -224,7 +228,7 @@ async function main() {
   console.log('         CLOUDFLARE_API_TOKEN   = that token');
   console.log(`         CLOUDFLARE_ACCOUNT_ID  = ${accountId ?? '(see `npx wrangler whoami`)'}`);
   console.log('');
-  if (readFileSync(CONFIG_PATH, 'utf8') !== before) {
+  if (readFileSync(CONFIG_PATH, 'utf8') !== before && existsSync(path.join(ROOT, '.git'))) {
     console.log('  One file changed — commit it so CI deploys the same database:');
     console.log(bold('    git add wrangler.jsonc && git commit -m "Add D1 database id" && git push'));
     console.log('');
