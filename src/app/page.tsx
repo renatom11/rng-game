@@ -109,6 +109,11 @@ export default function Home() {
           reach until the final act. The server won&apos;t even tell your
           browser the ending — it literally can&apos;t be spoiled.
         </li>
+        <li>
+          <strong>Crash-proof.</strong> Every race comes with a recovery code
+          that rebuilds it — mid-flight, to the second — on any Summit
+          server. <Link href="/restore">Restore from a code →</Link>
+        </li>
       </ul>
     </main>
   );

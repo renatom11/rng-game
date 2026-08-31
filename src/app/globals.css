@@ -437,6 +437,91 @@ button { font-family: inherit; }
 .readiness-line { margin-top: 0.6rem; font-size: 0.8rem; color: var(--snow-dim); }
 .readiness-line strong { color: var(--snow); }
 
+/* map: death sites + legend */
+.mtn-death {
+  fill: var(--danger);
+  font-size: 13px;
+  font-weight: 700;
+  opacity: 0.9;
+  paint-order: stroke;
+  stroke: #0a1220;
+  stroke-width: 2px;
+}
+.mtn-death-big { font-size: 19px; }
+.mtn-legend-label { fill: var(--snow-dim); font-size: 13px; }
+
+/* recovery code banner + restore */
+.code-banner {
+  background: var(--bg-panel);
+  border: 1px solid var(--gold);
+  border-radius: 12px;
+  padding: 0.8rem 0.95rem;
+  margin-bottom: 0.9rem;
+  display: grid;
+  gap: 0.55rem;
+}
+.code-banner-head { display: grid; gap: 0.15rem; font-size: 0.8rem; }
+.code-banner-head strong { color: var(--gold); }
+.code-banner-head span { color: var(--snow-dim); font-size: 0.74rem; line-height: 1.5; }
+.code-banner-code {
+  display: block;
+  font-size: 0.68rem;
+  word-break: break-all;
+  background: var(--bg-raised);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.5rem 0.6rem;
+  max-height: 5.5em;
+  overflow-y: auto;
+  user-select: all;
+}
+.code-banner-actions { display: flex; gap: 0.5rem; }
+.code-banner-dismiss {
+  background: none;
+  border: 1px solid var(--line);
+  color: var(--snow-dim);
+  border-radius: 8px;
+  padding: 0.35rem 0.7rem;
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-family: inherit;
+}
+.restore-input {
+  width: 100%;
+  background: var(--bg-panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--snow);
+  padding: 0.6rem 0.7rem;
+  font-family: ui-monospace, monospace;
+  font-size: 0.72rem;
+  resize: vertical;
+}
+
+/* dispatches filter */
+.feed-head { display: flex; align-items: baseline; justify-content: space-between; gap: 0.6rem; }
+.feed-filter { display: inline-flex; gap: 2px; background: var(--bg-panel); border-radius: 7px; padding: 2px; }
+.feed-filter-btn {
+  background: none;
+  border: none;
+  color: var(--snow-dim);
+  font-size: 0.66rem;
+  padding: 0.2rem 0.5rem;
+  border-radius: 5px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.feed-filter-btn.active { background: var(--bg-raised); color: var(--snow); }
+
+/* forecast strip */
+.forecast { display: flex; align-items: center; gap: 0.6rem; margin: 0.35rem 0 0.6rem; font-size: 0.72rem; color: var(--snow-dim); }
+.forecast-label { text-transform: uppercase; letter-spacing: 0.12em; font-size: 0.62rem; flex: none; }
+.forecast-track { position: relative; flex: 1; height: 8px; background: var(--bg-panel); border-radius: 4px; overflow: hidden; }
+.forecast-storm { position: absolute; top: 0; bottom: 0; background: rgba(255, 107, 94, 0.38); border-left: 1px solid rgba(255, 107, 94, 0.7); border-right: 1px solid rgba(255, 107, 94, 0.7); }
+.forecast-now { position: absolute; top: -2px; bottom: -2px; width: 2px; background: var(--ice); }
+.forecast-hint { flex: none; font-variant-numeric: tabular-nums; }
+.forecast-hint.storm-on { color: var(--danger); }
+
 /* lower row: feed + chart */
 .race-lower {
   display: grid;

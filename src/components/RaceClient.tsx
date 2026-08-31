@@ -25,6 +25,8 @@ import { PhaseBanner } from './PhaseBanner';
 import { Countdown } from './Countdown';
 import { PlaybackBar } from './PlaybackBar';
 import { FinaleSidebar } from './FinaleSidebar';
+import { ForecastStrip } from './ForecastStrip';
+import { RecoveryCodeBanner } from './RecoveryCodeBanner';
 import { ResultsRecap } from './ResultsRecap';
 import { MedalTable } from './olympics/MedalTable';
 import { LiveEventBoard } from './olympics/LiveEventBoard';
@@ -102,6 +104,7 @@ export function RaceClient({ slug }: { slug: string }) {
 
   return (
     <main className={`race-shell${finale ? ' is-finale' : ''}`}>
+      <RecoveryCodeBanner slug={slug} />
       {scheduled ? (
         <Countdown
           startAt={startAt}
@@ -223,6 +226,8 @@ function JourneyView({
         <h1 className="race-title-sm">{title}</h1>
         <PhaseBanner tMs={tMs} durationMs={durationMs} demo={demo} label={label} />
       </header>
+
+      <ForecastStrip storms={snap.storms ?? []} durationMs={durationMs} tMs={tMs} />
 
       <div className="race-grid">
         <section className="map-pane">

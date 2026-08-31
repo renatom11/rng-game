@@ -4,9 +4,9 @@ import { useMemo } from 'react';
 import type { JourneySnapshot } from '@/lib/slice';
 import {
   displayPosAt,
+  heightOrderAt,
   metersAt,
   momentum,
-  standingsAt,
   teamStatesAt,
   teamTags,
   type ClimberDeath,
@@ -40,8 +40,10 @@ export function Standings({ snap, jt, teamNames, tMs, durationMs, selected, onSe
   const n = teamNames.length;
   const tick = Math.floor(tMs / 2000);
 
+  // Live height order: the board shows who is actually highest right now,
+  // churning as teams rotate, hold, and get repulsed.
   const order = useMemo(
-    () => standingsAt(snap, n, tMs),
+    () => heightOrderAt(snap, n, tMs),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [snap, n, tick],
   );
@@ -51,7 +53,7 @@ export function Standings({ snap, jt, teamNames, tMs, durationMs, selected, onSe
     [snap, n, tick, jt],
   );
   const mom = useMemo(
-    () => momentum(snap, n, tMs, Math.max(120_000, durationMs / 15)),
+    () => momentum(snap, n, tMs, Math.max(120_000, durationMs / 15), heightOrderAt),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [snap, n, tick, durationMs],
   );
@@ -208,7 +210,7 @@ function TeamCard({
                         <span className="dossier-vitals">
                           {v.alive && status !== 'turned-back' ? (
                             <>
-                              SpO₂ <strong>{v.spo2}</strong> · {v.tempC}°C · output{' '}
+                              SpO₂ <strong>{v.spo2}</strong> · output{' '}
                               <strong>{v.output}</strong> · {v.note}
                             </>
                           ) : (

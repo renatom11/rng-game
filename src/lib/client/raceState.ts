@@ -105,6 +105,38 @@ export function standingsAt(
   return Array.from({ length: nTeams }, (_, i) => i);
 }
 
+/**
+ * Live "who is highest" order: what the mountain looks like right now.
+ * Pre-push the list is sorted by current display position (so the board
+ * churns as teams rotate, hold, and get repulsed — a resting leader really
+ * does drop down the list); in the push it defers to the race order.
+ * Summited teams stay on top in arrival order; wiped teams sink.
+ */
+export function heightOrderAt(
+  snap: JourneySnapshot,
+  nTeams: number,
+  tMs: number,
+): number[] {
+  if (tMs > snap.pushStartMs) return standingsAt(snap, nTeams, tMs);
+  const wipedAt = new Map(
+    snap.wipeouts.filter((w) => w.tMs <= tMs).map((w) => [w.teamIdx, w.tMs]),
+  );
+  const cpRank = new Map(standingsAt(snap, nTeams, tMs).map((t, i) => [t, i]));
+  return Array.from({ length: nTeams }, (_, i) => i).sort((a, b) => {
+    const wa = wipedAt.get(a);
+    const wb = wipedAt.get(b);
+    if (wa !== undefined || wb !== undefined) {
+      if (wa === undefined) return -1;
+      if (wb === undefined) return 1;
+      return wb - wa;
+    }
+    return (
+      displayPosAt(snap, b, tMs) - displayPosAt(snap, a, tMs) ||
+      (cpRank.get(a) ?? 0) - (cpRank.get(b) ?? 0)
+    );
+  });
+}
+
 /** Teams that have summited by t, in arrival order (from delivered events). */
 export function summitedOrder(snap: JourneySnapshot, tMs: number): number[] {
   const out: number[] = [];
@@ -121,6 +153,11 @@ export function momentum(
   nTeams: number,
   tMs: number,
   windowMs: number,
+  orderAt: (
+    snap: JourneySnapshot,
+    nTeams: number,
+    tMs: number,
+  ) => number[] = standingsAt,
 ): number[] {
   // Before real standings exist there is no momentum — comparing against
   // the identity-order fallback fabricates arrows out of nothing.
@@ -128,8 +165,8 @@ export function momentum(
   if (firstCp === undefined || tMs - windowMs < firstCp) {
     return new Array(nTeams).fill(0);
   }
-  const now = standingsAt(snap, nTeams, tMs);
-  const before = standingsAt(snap, nTeams, tMs - windowMs);
+  const now = orderAt(snap, nTeams, tMs);
+  const before = orderAt(snap, nTeams, tMs - windowMs);
   const rankNow = new Map(now.map((t, i) => [t, i]));
   const rankBefore = new Map(before.map((t, i) => [t, i]));
   return Array.from({ length: nTeams }, (_, i) => {
@@ -227,8 +264,12 @@ export function teamStatesAt(
       s.activity = jt.motion.down;
     } else {
       const wp = jt.waypointAt(pos + 0.015);
-      s.activity =
-        Math.abs(wp.frac - pos) < 0.02
+      const inStorm =
+        jt.motion.holdingStorm !== undefined &&
+        (snap.storms ?? []).some((st) => tMs >= st.startMs && tMs <= st.endMs);
+      s.activity = inStorm
+        ? jt.motion.holdingStorm!(Math.abs(wp.frac - pos) < 0.02 ? wp.label : 'altitude')
+        : Math.abs(wp.frac - pos) < 0.02
           ? jt.motion.restingAt(wp.label)
           : jt.motion.holding;
     }

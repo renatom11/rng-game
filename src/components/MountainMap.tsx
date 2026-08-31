@@ -77,6 +77,29 @@ export function MountainMap({ snap, teamNames, tMs, selected, onSelect, finale }
     return raw;
   }, [snap, n, tMs, choices]);
 
+  // Where people were lost: a small red ✕ stays on the mountain at each
+  // death site (delivered events only — the map can never foreshadow).
+  const deathMarks = useMemo(() => {
+    const out: { x: number; y: number; big: boolean; key: string }[] = [];
+    for (const e of snap.events) {
+      if (e.tMs > tMs) break;
+      if (e.type !== 'climber_fall' && e.type !== 'team_wipeout') continue;
+      if (e.teamIdx === undefined) continue;
+      const pos = displayPosAt(snap, e.teamIdx, e.tMs);
+      const ch = edgeChoicesAt(snap, n, e.tMs, SEG_BY_EDGE)[e.teamIdx];
+      const [x, y] = markerXY(pos, ch);
+      const idx = out.length;
+      out.push({
+        x: x + ((idx % 3) - 1) * 9,
+        y: y + (idx % 2) * 7 - 3,
+        big: e.type === 'team_wipeout',
+        key: `${e.tMs}-${e.teamIdx}-${e.climberIdx ?? 'w'}`,
+      });
+    }
+    return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [snap, n, Math.floor(tMs / 2000)]);
+
   // An edge is lit when some team's current-segment choice matches it.
   const activeEdges = useMemo(() => {
     const set = new Set<string>();
@@ -188,6 +211,19 @@ export function MountainMap({ snap, teamNames, tMs, selected, onSelect, finale }
           );
         })}
 
+        {/* Death sites */}
+        {deathMarks.map((d) => (
+          <text
+            key={d.key}
+            x={d.x}
+            y={d.y}
+            textAnchor="middle"
+            className={`mtn-death${d.big ? ' mtn-death-big' : ''}`}
+          >
+            ✕
+          </text>
+        ))}
+
         {/* Team markers */}
         {markers.map((m) => {
           const state = states[m.teamIdx];
@@ -220,6 +256,32 @@ export function MountainMap({ snap, teamNames, tMs, selected, onSelect, finale }
             </g>
           );
         })}
+      </g>
+
+      {/* Route legend (fixed — does not zoom) */}
+      <g transform={`translate(16, ${VIEW_H - 78})`} aria-hidden>
+        <rect x={-8} y={-18} width={208} height={72} rx={8} fill="#0a1220" opacity={0.72} />
+        {(
+          [
+            ['risky', 'Risky — faster', '7 5'],
+            ['medium', 'Standard', undefined],
+            ['safe', 'Safe — slower', '2 4'],
+          ] as const
+        ).map(([risk, label, dash], i) => (
+          <g key={risk} transform={`translate(4, ${i * 21})`}>
+            <path
+              d="M0 0 H34"
+              stroke={RISK_COLOR[risk]}
+              strokeWidth={2.5}
+              strokeDasharray={dash}
+              strokeLinecap="round"
+              fill="none"
+            />
+            <text x={44} y={4.5} className="mtn-legend-label">
+              {label}
+            </text>
+          </g>
+        ))}
       </g>
     </svg>
   );

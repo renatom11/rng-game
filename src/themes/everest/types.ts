@@ -144,6 +144,13 @@ export interface EverestTimeline {
   events: RaceEvent[];
   /** Teams whose whole squad is lost (bottom placements only), with time. */
   wipeouts: { teamIdx: number; tMs: number }[];
+  /**
+   * Storm windows, for the forecast strip. Drawn from their own stream,
+   * independent of the outcome — the whole schedule is safe to serve
+   * upfront (knowing when weather comes says nothing about who wins).
+   * Absent on pre-weather stored races and on themes without weather.
+   */
+  storms?: { startMs: number; endMs: number }[];
   /** Edge risk lookup convenience for the client. */
   edgeRisk: Record<string, Risk>;
 }

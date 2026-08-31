@@ -52,13 +52,18 @@ export function generateEverest(
 
   const weather = buildWeather(forkRng(seedHex, 'weather'), durationMs);
 
-  const displayTrack = buildDisplayTrack(
+  const choreo = buildDisplayTrack(
     forkRng(seedHex, 'rotations'),
     core,
     durationMs,
     undefined,
     fate.falls,
+    weather.storms,
+    styles,
   );
+  // Beats stay generation-side (the event layer narrates them); the stored
+  // track keeps its lean shape.
+  const displayTrack = { tMs: choreo.tMs, pos: choreo.pos };
 
   // Freeze wiped teams where they were lost: the mountain keeps them.
   for (const w of fate.wipeouts) {
@@ -95,6 +100,7 @@ export function generateEverest(
     traversals,
     fate,
     weather,
+    beats: choreo.beats,
     climbers,
     cast,
     teamNames: config.teams.map((t) => t.name),
@@ -118,5 +124,6 @@ export function generateEverest(
     events,
     wipeouts: fate.wipeouts,
     edgeRisk,
+    storms: weather.storms,
   };
 }

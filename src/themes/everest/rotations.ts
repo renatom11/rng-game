@@ -2,6 +2,7 @@ import type { CoreTimeline } from '@/engine/types';
 import { HOLD_P, PUSH_U, progressAt } from '@/engine/types';
 import type { RNG } from '@/engine/prng';
 import { NODES, nodeById } from './route';
+import type { Style } from './types';
 
 /**
  * The display track: where each team visibly IS on the mountain.
@@ -126,16 +127,44 @@ export interface PaceEvent {
   tMs: number;
 }
 
+/**
+ * A choreography beat the event layer narrates: a repulsed attempt (the
+ * team pushed for the next camp, failed, and retreated to where it left),
+ * a weather hold (dug in at a camp while a storm passed), or a storm push
+ * (climbed through the weather and got away with it). Beats are
+ * generation-side only — never serialized — and, like everything here,
+ * pure decoration on standings the core already decided.
+ */
+export interface ChoreoBeat {
+  kind: 'repulsed' | 'hold' | 'stormPush';
+  teamIdx: number;
+  tMs: number;
+  /** The camp frac the beat is anchored to (retreated to / holding at). */
+  campFrac: number;
+  stormy: boolean;
+}
+
+export interface StormWindow {
+  startMs: number;
+  endMs: number;
+}
+
 export function buildDisplayTrack(
   rng: RNG,
   core: CoreTimeline,
   durationMs: number,
   route: RotationRoute = EVEREST_ROTATION_ROUTE,
   paceEvents: PaceEvent[] = [],
-): { tMs: number[]; pos: number[][] } {
+  storms: StormWindow[] = [],
+  styles?: Style[],
+): { tMs: number[]; pos: number[][]; beats: ChoreoBeat[] } {
   const n = core.grid.p.length;
   const tMs = sparseTimes(durationMs, [core.pushStartMs, ...core.summitTimesMs]);
   const pos: number[][] = [];
+  const beats: ChoreoBeat[] = [];
+  // Failed-attempt texture needs enough steps to read as a story; a 1-2
+  // minute race keeps the clean climb.
+  const allowFails = durationMs >= 300_000;
 
   // Per-step motion caps scale with the sparse step so short races can
   // actually move (a fixed cap strangled a 1-minute race), while long races
@@ -159,6 +188,32 @@ export function buildDisplayTrack(
 
   for (let team = 0; team < n; team++) {
     const cycles = buildCycles(rng, durationMs, team, n, route.forceShallow ?? false);
+
+    // Weather decisions: does this team sit a given storm out at a camp, or
+    // gamble and keep climbing through it? Style flavors the choice (and,
+    // like every style effect, shapes only the telling — never the outcome).
+    const style = styles?.[team] ?? 'balanced';
+    const holdP = style === 'cautious' ? 0.9 : style === 'bold' ? 0.4 : 0.7;
+    const holdStorm = storms.map(() => rng() < holdP);
+    const stormCamp: (number | undefined)[] = storms.map(() => undefined);
+    const holdBeaten = storms.map(() => false);
+    const pushBeaten = storms.map(() => false);
+
+    // Attempt plans: per rotation cycle, does the push for height fail and
+    // force a retreat to the camp it started from? Climbing into a storm
+    // makes failure much more likely — the retreat is the price of the
+    // gamble the wait-it-out teams refused.
+    const attempts = cycles.map((c) => {
+      const ascEnd = c.startMs + c.shape[0] * (c.endMs - c.startMs);
+      const stormy = storms.some(
+        (s, si) => !holdStorm[si] && c.startMs < s.endMs && ascEnd > s.startMs,
+      );
+      const failRoll = rng();
+      const peakF = 0.45 + rng() * 0.3;
+      const fail = allowFails && failRoll < (stormy ? 0.75 : 0.35);
+      return { fail, stormy, peakF, beaten: false };
+    });
+
     const deaths = paceEvents
       .filter((pe) => pe.teamIdx === team && pe.tMs < T_FREE)
       .map((pe) => pe.tMs);
@@ -203,12 +258,13 @@ export function buildDisplayTrack(
         // Rotation choreography. Max reach tracks p; oscillate below it.
         // A squad that lost someone visibly climbs lower for a while.
         const reach = Math.max(0, Math.min(p, C4_FRAC - 0.02) - lagAt(t));
-        const cycle = cycles.find((c) => t >= c.startMs && t < c.endMs);
+        const ci = cycles.findIndex((c) => t >= c.startMs && t < c.endMs);
+        const cycle = ci >= 0 ? cycles[ci] : null;
         if (!cycle) {
           x = Math.min(reach, lastPos + 0.004);
         } else {
           const cf = (t - cycle.startMs) / (cycle.endMs - cycle.startMs);
-          const [a, dh, d, dl] = cycle.shape;
+          const [a, dh, d] = cycle.shape;
           const restFrac =
             route.restFracs[
               Math.max(0, restIndexBelow(route.restFracs, reach) - cycle.restDepth)
@@ -217,16 +273,71 @@ export function buildDisplayTrack(
           // Short races / shallow themes: keep rest stops close enough.
           if (durationMs < 900_000 || route.forceShallow) low = Math.max(low, reach - 0.2);
           if (cf < a) {
-            // ascend from low toward reach
             const f = cf / a;
-            x = low + (reach - low) * (f * f * (3 - 2 * f));
+            const at = attempts[ci];
+            if (!at.fail) {
+              // clean ascent from low toward reach
+              x = low + (reach - low) * smooth(f);
+            } else {
+              // A failed attempt: push toward the next height, get turned
+              // around partway, retreat to the camp just left, then go
+              // again. The wasted climbing drains the meters (they derive
+              // from motion), which is the whole tradeoff made visible.
+              const peak = low + (reach - low) * at.peakF;
+              const dipTo = low + (reach - low) * 0.06;
+              if (f < 0.45) {
+                x = low + (peak - low) * smooth(f / 0.45);
+              } else if (f < 0.72) {
+                x = peak - (peak - dipTo) * smooth((f - 0.45) / 0.27);
+                if (!at.beaten) {
+                  at.beaten = true;
+                  beats.push({
+                    kind: 'repulsed', teamIdx: team, tMs: t,
+                    campFrac: low, stormy: at.stormy,
+                  });
+                }
+              } else {
+                x = dipTo + (reach - dipTo) * smooth((f - 0.72) / 0.28);
+              }
+            }
           } else if (cf < a + dh) {
             x = reach; // dwell high
           } else if (cf < a + dh + d) {
             const f = (cf - a - dh) / d;
-            x = reach - (reach - low) * (f * f * (3 - 2 * f));
+            x = reach - (reach - low) * smooth(f);
           } else {
             x = low; // dwell low (resting)
+          }
+        }
+
+        // Weather: teams that chose to sit a storm out hold flat at the
+        // camp they were at when it rolled in — and spring, rested, when it
+        // breaks. Teams that gambled keep moving through it (their attempt
+        // plans already made failure much more likely).
+        for (let si = 0; si < storms.length; si++) {
+          const s = storms[si];
+          if (t < s.startMs || t > s.endMs) continue;
+          if (!holdStorm[si]) {
+            if (!pushBeaten[si] && x > lastPos + 0.0008) {
+              pushBeaten[si] = true;
+              beats.push({
+                kind: 'stormPush', teamIdx: team, tMs: t,
+                campFrac: lastPos, stormy: true,
+              });
+            }
+            continue;
+          }
+          if (stormCamp[si] === undefined) {
+            stormCamp[si] =
+              route.restFracs[restIndexBelow(route.restFracs, lastPos + 0.005)];
+          }
+          if (x > stormCamp[si]!) x = stormCamp[si]!;
+          if (!holdBeaten[si]) {
+            holdBeaten[si] = true;
+            beats.push({
+              kind: 'hold', teamIdx: team, tMs: Math.max(t, s.startMs),
+              campFrac: stormCamp[si]!, stormy: true,
+            });
           }
         }
       }
@@ -244,5 +355,6 @@ export function buildDisplayTrack(
     pos.push(row);
   }
 
-  return { tMs, pos };
+  beats.sort((a, b) => a.tMs - b.tMs || a.teamIdx - b.teamIdx);
+  return { tMs, pos, beats };
 }

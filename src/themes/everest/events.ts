@@ -6,16 +6,23 @@ import { NODES, SEGMENTS, altitudeAt, nodeAtOrBelow, nodeById } from './route';
 import type { Climber, DeathCause, RaceEvent } from './types';
 import type { Cast } from './names';
 import type { FatePlan, Traversal, WeatherPlan } from './decorate';
+import type { ChoreoBeat } from './rotations';
 import type { Risk } from './route';
 import { LineWriter } from '@/lib/linewriter';
 import {
+  CAUGHT_WAITING_LINES,
   DEATH_TEMPLATES,
+  PATIENCE_LINES,
   PHASE_NAMES,
+  REPULSED_LINES,
+  REPULSED_STORM_LINES,
   SHORT_HANDED,
+  STORM_GAMBLE_LINES,
   STORM_LINES,
   STORM_ONSET,
   TEMPLATES,
   TROUBLES,
+  WEATHER_HOLD_LINES,
   WEATHER_LINES,
   WIPEOUT_TEMPLATES,
 } from './commentary/templates';
@@ -37,6 +44,7 @@ interface BuildEventsInput {
   traversals: Traversal[];
   fate: FatePlan;
   weather: WeatherPlan;
+  beats: ChoreoBeat[];
   climbers: Climber[][];
   cast: Cast;
   teamNames: string[];
@@ -54,7 +62,7 @@ function ordinal(place: number): string {
 export function buildEvents(input: BuildEventsInput): RaceEvent[] {
   const {
     rng, core, durationMs, displayTrack, meters, traversals, fate, weather,
-    climbers, cast, teamNames,
+    beats, climbers, cast, teamNames,
   } = input;
   const n = teamNames.length;
   const writer = new LineWriter(rng);
@@ -109,6 +117,18 @@ export function buildEvents(input: BuildEventsInput): RaceEvent[] {
   }
 
   // --- Track-derived team movement events ---------------------------------
+  // Repulsed-attempt dips get their own narration; the generic mode-change
+  // events stand aside around them ("descending to rest" over a forced
+  // retreat reads as nonsense).
+  const repulseTimes = new Map<number, number[]>();
+  for (const b of beats) {
+    if (b.kind !== 'repulsed') continue;
+    if (!repulseTimes.has(b.teamIdx)) repulseTimes.set(b.teamIdx, []);
+    repulseTimes.get(b.teamIdx)!.push(b.tMs);
+  }
+  const nearRepulse = (team: number, t: number, win: number): boolean =>
+    (repulseTimes.get(team) ?? []).some((rt) => Math.abs(t - rt) < win);
+
   const times = displayTrack.tMs;
   for (let team = 0; team < n; team++) {
     const row = displayTrack.pos[team];
@@ -119,6 +139,10 @@ export function buildEvents(input: BuildEventsInput): RaceEvent[] {
       const t = times[i];
       if (t >= core.pushStartMs) break; // push handled separately
       if (wipedAt.has(team) && t >= wipedAt.get(team)!) break;
+      if (nearRepulse(team, t, minGap * 1.5)) {
+        mode = row[i] - row[i - 1] > 0.0008 ? 'up' : 'down';
+        continue;
+      }
       const d = row[i] - row[i - 1];
       const newMode: 'up' | 'down' | 'rest' =
         d > 0.0008 ? 'up' : d < -0.0008 ? 'down' : 'rest';
@@ -429,6 +453,79 @@ export function buildEvents(input: BuildEventsInput): RaceEvent[] {
         gap: w.teamIdx + 1,
       }),
     });
+  }
+
+  // --- Camp-life beats: repulsed attempts, weather holds, storm gambles ----
+  const campLabelAt = (frac: number) => nodeAtOrBelow(frac + 0.01).label;
+  const beatCount = new Map<number, number>();
+  for (const b of beats) {
+    const wipeAt = wipedAt.get(b.teamIdx);
+    if (wipeAt !== undefined && b.tMs >= wipeAt) continue;
+    if (b.tMs >= core.pushStartMs) continue;
+    const camp = campLabelAt(b.campFrac);
+    const ctx = { ...ctxFor(b.teamIdx), camp, alt: altitudeAt(displayAtTime(displayTrack, b.teamIdx, b.tMs)) };
+    if (b.kind === 'repulsed') {
+      const seen = beatCount.get(b.teamIdx) ?? 0;
+      if (seen >= 3) continue; // narrate at most three retreats per team
+      beatCount.set(b.teamIdx, seen + 1);
+      const pool = b.stormy ? REPULSED_STORM_LINES : REPULSED_LINES;
+      events.push({
+        tMs: b.tMs, type: 'setback', teamIdx: b.teamIdx, severity: 2,
+        activity: `Retreating to ${camp}`,
+        text: writer.render(b.stormy ? 'setback:repulsed-storm' : 'setback:repulsed', pool, ctx),
+      });
+      nudgeMeter(meters, b.teamIdx, METER_INDEX.MORALE, times, b.tMs, -7);
+    } else if (b.kind === 'hold') {
+      events.push({
+        tMs: b.tMs, type: 'radio', teamIdx: b.teamIdx, severity: 1,
+        activity: `Waiting out the storm at ${camp}`,
+        text: writer.render('radio:weatherhold', WEATHER_HOLD_LINES, ctx),
+      });
+    } else {
+      events.push({
+        tMs: b.tMs, type: 'surge', teamIdx: b.teamIdx, severity: 2,
+        text: writer.render('surge:stormgamble', STORM_GAMBLE_LINES, ctx),
+      });
+    }
+  }
+
+  // The wait-vs-go ledger, settled: after each storm, the holder whose
+  // standing improved most gets the patience line; the holder who lost the
+  // most places got caught waiting. (Checkpoint standings — the core's own
+  // story — decide who's who; the lines only put weather-words to it.)
+  for (const s of weather.storms) {
+    const before = lastCheckpointAt(core, s.startMs);
+    const after = core.checkpoints.find((cp) => cp.tMs >= s.endMs);
+    if (!before || !after || s.endMs >= core.pushStartMs) continue;
+    const holders = beats.filter(
+      (b) => b.kind === 'hold' && b.tMs >= s.startMs && b.tMs <= s.endMs,
+    );
+    let bestGain = 0, bestTeam = -1, worstDrop = 0, worstTeam = -1, worstCamp = '';
+    for (const h of holders) {
+      const wipeAt = wipedAt.get(h.teamIdx);
+      if (wipeAt !== undefined && s.endMs >= wipeAt) continue;
+      const delta = after.order.indexOf(h.teamIdx) - before.order.indexOf(h.teamIdx);
+      if (delta < bestGain) { bestGain = delta; bestTeam = h.teamIdx; }
+      if (delta > worstDrop) { worstDrop = delta; worstTeam = h.teamIdx; worstCamp = campLabelAt(h.campFrac); }
+    }
+    const jitter = Math.round(s.endMs + Math.max(30_000, durationMs * 0.015) * (0.8 + rng() * 0.4));
+    if (bestTeam >= 0 && bestGain <= -1 && jitter < core.pushStartMs) {
+      const h = holders.find((x) => x.teamIdx === bestTeam)!;
+      events.push({
+        tMs: jitter, type: 'surge', teamIdx: bestTeam, severity: 2,
+        text: writer.render('surge:patience', PATIENCE_LINES, {
+          ...ctxFor(bestTeam), camp: campLabelAt(h.campFrac),
+        }),
+      });
+    }
+    if (worstTeam >= 0 && worstDrop >= 2 && jitter + 1000 < core.pushStartMs) {
+      events.push({
+        tMs: jitter + 1000, type: 'setback', teamIdx: worstTeam, severity: 2,
+        text: writer.render('setback:caughtwaiting', CAUGHT_WAITING_LINES, {
+          ...ctxFor(worstTeam), camp: worstCamp,
+        }),
+      });
+    }
   }
 
   // --- Resupplies detected from meter refills ------------------------------

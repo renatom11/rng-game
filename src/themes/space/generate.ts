@@ -43,7 +43,7 @@ export function generateSpace(
 
   // Spacecraft loop back to rendezvous, they don't fly home: shallow dips
   // only, resting at the mission waypoints.
-  const displayTrack = buildDisplayTrack(
+  const orbits = buildDisplayTrack(
     forkRng(seedHex, 'space-orbits'),
     core,
     durationMs,
@@ -52,6 +52,9 @@ export function generateSpace(
       forceShallow: true,
     },
   );
+  // Aborted-approach loops read naturally in space, but the beats and storm
+  // machinery are Everest's; the stored track keeps its lean shape.
+  const displayTrack = { tMs: orbits.tMs, pos: orbits.pos };
 
   const fate = buildFate(
     forkRng(seedHex, 'space-fate'),

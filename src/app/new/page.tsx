@@ -86,6 +86,13 @@ export default function NewRacePage() {
         setBusy(false);
         return;
       }
+      if (data.recoveryCode) {
+        try {
+          sessionStorage.setItem(`summit-code-${data.slug}`, data.recoveryCode);
+        } catch {
+          // storage unavailable — the race still works, just no banner
+        }
+      }
       router.push(data.url);
     } catch {
       setErr('network error — try again');

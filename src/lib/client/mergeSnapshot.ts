@@ -41,6 +41,7 @@ function mergeJourney(
     styles: prev.styles,
     colors: prev.colors,
     edgeRisk: prev.edgeRisk,
+    storms: prev.storms,
     pushStartMs: next.pushStartMs,
     events: [...prev.events, ...next.events],
     checkpoints: [...prev.checkpoints, ...next.checkpoints],

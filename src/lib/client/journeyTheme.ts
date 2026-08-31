@@ -29,6 +29,8 @@ export interface JourneyTheme {
     restingAt: (waypoint: string) => string;
     holding: string;
     preparing: string;
+    /** stationary during a storm window, e.g. "Waiting out the storm at Camp II" */
+    holdingStorm?: (waypoint: string) => string;
   };
   statusLabels: Record<ClimberStatus, string>;
   /** 7 labels in meter order: o2, food, rope, med, energy, morale, accl */
@@ -46,7 +48,7 @@ export interface JourneyTheme {
 }
 
 export const EVEREST_JOURNEY: JourneyTheme = {
-  standingsTitle: 'Expedition standings',
+  standingsTitle: 'On the mountain',
   finaleTitle: 'SUMMIT PUSH',
   squadTitle: 'Squad',
   readinessLabel: 'Readiness for next push',
@@ -66,6 +68,7 @@ export const EVEREST_JOURNEY: JourneyTheme = {
     restingAt: (w) => `Resting at ${w}`,
     holding: 'Holding position',
     preparing: 'Preparing at Base Camp',
+    holdingStorm: (w) => `Waiting out the storm at ${w}`,
   },
   statusLabels: {
     climbing: 'climbing',

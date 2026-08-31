@@ -13,13 +13,17 @@ Three themes ship today, all skins over the same fair core:
 
 - **🏔 Everest Expedition** — every name sponsors a squad of four generated
   climbers: real-feeling people with heritage-consistent names, portraits,
-  ages, hometowns, and one-line backstories, each with live vitals (SpO₂,
-  core temp, output). They work up the mountain through acclimatization
-  rotations, storms, risky-vs-safe route choices, and dwindling oxygen —
-  and some of them die, each with a visible cause (crevasse, serac, the
-  face, exposure, exhaustion, altitude sickness, avalanche). Short-handed
-  squads visibly climb slower; a results memorial names everyone the
-  mountain kept. Order of summiting is the result.
+  ages, hometowns, and one-line backstories, each with live vitals. Camp
+  life is the drama: squads attempt the next camp and get repulsed back to
+  where they started, sit out forecast storms to bank strength (or gamble
+  and climb into them), and pay for every wasted metre in supplies — the
+  patient team sometimes springs past a spent field, and sometimes gets
+  caught waiting as the window slams shut. The mountain is brutal: deaths
+  come with visible causes (crevasse, serac, the face, exposure,
+  exhaustion, altitude sickness, avalanche), red ✕ marks stay where people
+  were lost, short-handed squads visibly climb slower, and a results
+  memorial names everyone the mountain kept. Order of summiting is the
+  result.
 - **🏅 The Games** — delegations compete across a full Olympic programme with
   live events, a medal table, and backloaded marquee events; the closing
   event decides gold. Final points table is the result.
@@ -56,6 +60,17 @@ Three properties are enforced by construction and by tests:
 Demo races opt out of spoiler-proofing and get playback controls
 (1×–600× speed and a scrubber) so you can watch an "8-hour" race in a minute.
 Finished races unlock the same controls as a replay.
+
+## Recovery codes
+
+A race is a pure function of (seed, config, start time), so creation hands
+the host a one-line **recovery code** that IS the race. If the server,
+database, or hosting provider dies mid-race, pasting the code at `/restore`
+on any Summit instance rebuilds the race byte-identically — same teams,
+same story, same ending, same URL slug — picked up at exactly the right
+moment (position is just clock arithmetic against the embedded start time).
+The code contains the sealed ending, so it is shown once, only to the
+creator, and never served again.
 
 ## Running it
 

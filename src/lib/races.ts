@@ -11,6 +11,7 @@ import type { EverestTimeline, Style } from '@/themes/everest/types';
 import { generateOlympics } from '@/themes/olympics/generate';
 import type { OlympicsTimeline } from '@/themes/olympics/types';
 import { generateSpace } from '@/themes/space/generate';
+import { decodeRaceCode, encodeRaceCode } from './raceCode';
 
 /** Slug alphabet without lookalikes (no 0/O/1/l/i/u). */
 const SLUG_CHARS = 'abcdefghjkmnpqrstvwxyz23456789';
@@ -109,18 +110,26 @@ export function validateCreateInput(
   };
 }
 
+function generateTimeline(
+  theme: Theme,
+  seed: string,
+  teams: RaceConfigStored['teams'],
+  durationMs: number,
+) {
+  return theme === 'olympics'
+    ? generateOlympics(seed, { teams, durationMs })
+    : theme === 'space'
+      ? generateSpace(seed, { teams, durationMs })
+      : generateEverest(seed, { teams, durationMs });
+}
+
 export function createRace(
   input: CreateRaceInput,
   nowMs: number,
-): { slug: string } {
+): { slug: string; recoveryCode: string } {
   const { config, durationMs, startAtMs } = validateCreateInput(input, nowMs);
   const seed = crypto.randomBytes(16).toString('hex');
-  const timeline =
-    config.theme === 'olympics'
-      ? generateOlympics(seed, { teams: config.teams, durationMs })
-      : config.theme === 'space'
-        ? generateSpace(seed, { teams: config.teams, durationMs })
-        : generateEverest(seed, { teams: config.teams, durationMs });
+  const timeline = generateTimeline(config.theme, seed, config.teams, durationMs);
   const slug = newSlug();
   getDb()
     .prepare(
@@ -137,7 +146,65 @@ export function createRace(
       startAtMs,
       durationMs,
     );
-  return { slug };
+  const recoveryCode = encodeRaceCode({
+    v: 1,
+    slug,
+    seed,
+    theme: config.theme,
+    title: config.title,
+    teams: config.teams,
+    durationMs,
+    startAtMs,
+    demo: config.demo,
+    createdAt: nowMs,
+  });
+  return { slug, recoveryCode };
+}
+
+/**
+ * Rebuild a race from a recovery code — same seed, same config, same start
+ * time, same slug (so already-shared links work again on this server).
+ * Deterministic regeneration means the restored race is the race: identical
+ * outcome, identical story, picked up at exactly the right point in time.
+ * Idempotent: restoring a race that already exists is a no-op.
+ */
+export function restoreRace(
+  code: string,
+  nowMs: number,
+): { slug: string; existed: boolean } {
+  const p = decodeRaceCode(code);
+  const db = getDb();
+  const existing = db.prepare('SELECT id FROM races WHERE id = ?').get(p.slug);
+  if (existing) return { slug: p.slug, existed: true };
+
+  // Re-validate the embedded config with the code's own start time as "now"
+  // — a restored race is allowed (expected!) to have started in the past.
+  const { config, durationMs, startAtMs } = validateCreateInput(
+    {
+      title: p.title,
+      theme: p.theme,
+      teams: p.teams,
+      durationMs: p.durationMs,
+      startAtMs: p.startAtMs,
+      demo: p.demo,
+    },
+    p.startAtMs,
+  );
+  const timeline = generateTimeline(config.theme, p.seed, config.teams, durationMs);
+  db.prepare(
+    `INSERT INTO races (id, theme, seed, config_json, timeline_json, created_at, start_at, duration_ms)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    p.slug,
+    config.theme,
+    p.seed,
+    JSON.stringify(config),
+    JSON.stringify(timeline),
+    p.createdAt ?? nowMs,
+    startAtMs,
+    durationMs,
+  );
+  return { slug: p.slug, existed: false };
 }
 
 export interface RaceView {

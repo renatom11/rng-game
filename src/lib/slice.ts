@@ -78,6 +78,11 @@ export interface JourneySnapshot {
   displayTrack: { tMs: number[]; pos: number[][] };
   meters: { tMs: number[]; values: number[][][] };
   wipeouts: EverestTimeline['wipeouts'];
+  /**
+   * Full storm schedule (forecast). Static and spoiler-safe: storms are
+   * drawn from their own stream, independent of the outcome.
+   */
+  storms: { startMs: number; endMs: number }[];
   /** Present only when complete. */
   finalOrder?: number[];
   finalRank?: number[];
@@ -156,6 +161,7 @@ export function toJourneySnapshot<T extends 'everest' | 'space'>(
       displayTrack: timeline.displayTrack,
       meters: timeline.meters,
       wipeouts: timeline.wipeouts,
+      storms: timeline.storms ?? [],
       finalOrder: core.finalOrder,
       finalRank: core.finalRank,
       summitTimesMs: core.summitTimesMs,
@@ -201,6 +207,7 @@ export function toJourneySnapshot<T extends 'everest' | 'space'>(
       ),
     },
     wipeouts: timeline.wipeouts.filter((w) => inWindow(w.tMs)),
+    storms: delta ? [] : (timeline.storms ?? []),
   };
 }
 

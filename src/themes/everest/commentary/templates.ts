@@ -254,6 +254,49 @@ export const STORM_LINES = [
   'Tents flex to the limit of their poles. Everything that can be tied down is.',
 ];
 
+/**
+ * Camp-life beats: failed attempts, weather holds, and the gambles around
+ * them. Rendered on existing event types via dedicated pool keys. Slots
+ * available: {team} {sherpa} {camp} {alt}.
+ */
+export const REPULSED_LINES = [
+  'Turned back at {alt} metres. {team} descend to {camp}, spent and swearing — the mountain said not today.',
+  '{team} push for height and the mountain pushes back. Retreat to {camp}; brew tea; try to forget the wasted metres.',
+  'The attempt breaks at {alt} metres. {sherpa} calls the turn, and {team} file back down to {camp}.',
+  'Hours of climbing for nothing: {team} are back at {camp} where they started, minus the strength it cost.',
+];
+
+export const REPULSED_STORM_LINES = [
+  '{team} climbed into the weather and the weather won. Back to {camp}, coated in rime, nothing gained.',
+  'The gamble fails — wind hammers {team} off the route at {alt} metres. The teams that waited watch them descend to {camp}.',
+  'Whiteout at {alt} metres. {team} feel their way back down to {camp}, ropes singing in the wind.',
+];
+
+export const WEATHER_HOLD_LINES = [
+  '{team} dig in at {camp}: stoves on, tents double-guyed, eyes on the sky. Sometimes the bravest thing is a brew.',
+  'No metres today for {team}. {sherpa} looks at the clouds once and starts unpacking at {camp}.',
+  '{team} choose patience at {camp} — burning daylight, banking strength.',
+  'The storm owns the mountain, so {team} own a tent at {camp}. Cards are produced.',
+];
+
+export const PATIENCE_LINES = [
+  'The wait pays. {team} leave {camp} rested and full, and take back everything the storm-chasers spent.',
+  'Patience, vindicated: {team} come out of {camp} like a spring uncoiling.',
+  '{team} sat still while others burned themselves on the weather — now they climb through a tired field.',
+];
+
+export const CAUGHT_WAITING_LINES = [
+  'The sky cleared and closed again before {team} moved. The wait at {camp} bought them nothing but lost places.',
+  'Sometimes the mountain punishes patience too: {team} waited at {camp}, and the field simply left.',
+  '{team} watched the weather while the race went up without them. The ledger at {camp} reads: rested, and behind.',
+];
+
+export const STORM_GAMBLE_LINES = [
+  '{team} climb INTO the weather — audacity or madness, and today it is audacity. They move while the mountain blinks.',
+  'Everyone else hunkers; {team} lean into the wind and go. {sherpa} breaks trail by feel.',
+  'The forecast said no. {team} went anyway, and got away with it.',
+];
+
 export const TROUBLES = [
   'a shredded crampon strap',
   'a frozen regulator on the lead bottle',

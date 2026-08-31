@@ -7,10 +7,16 @@ import { HERITAGES, SHERPA_HERITAGE } from '@/themes/everest/people';
 import { SQUAD_ROLES } from '@/themes/everest/names';
 import { buildDisplayTrack } from '@/themes/everest/rotations';
 import {
+  CAUGHT_WAITING_LINES,
   DEATH_TEMPLATES,
+  PATIENCE_LINES,
+  REPULSED_LINES,
+  REPULSED_STORM_LINES,
   SHORT_HANDED,
+  STORM_GAMBLE_LINES,
   STORM_LINES,
   STORM_ONSET,
+  WEATHER_HOLD_LINES,
   WIPEOUT_TEMPLATES,
 } from '@/themes/everest/commentary/templates';
 import { LineWriter } from '@/lib/linewriter';
@@ -412,11 +418,47 @@ describe('sponsored squads', () => {
     expect(JSON.stringify(lag)).toEqual(JSON.stringify(base));
   });
 
+  it('storm windows are serialized, sane, and the field visibly slows inside them', () => {
+    let stormMove = 0, clearMove = 0, sm = 0, cm = 0;
+    for (const t of runs) {
+      const storms = t.storms ?? [];
+      expect(storms.length).toBeGreaterThanOrEqual(1);
+      for (let i = 0; i < storms.length; i++) {
+        expect(storms[i].startMs).toBeGreaterThanOrEqual(0);
+        expect(storms[i].endMs).toBeGreaterThan(storms[i].startMs);
+        expect(storms[i].endMs).toBeLessThanOrEqual(DUR);
+        if (i > 0) expect(storms[i].startMs).toBeGreaterThan(storms[i - 1].endMs);
+      }
+      for (let i = 1; i < t.displayTrack.tMs.length; i++) {
+        const tm = t.displayTrack.tMs[i];
+        if (tm > 0.75 * DUR) break;
+        const inStorm = storms.some((s) => tm >= s.startMs && tm <= s.endMs);
+        for (let team = 0; team < N; team++) {
+          const d = Math.abs(t.displayTrack.pos[team][i] - t.displayTrack.pos[team][i - 1]);
+          if (inStorm) { stormMove += d; sm++; }
+          else { clearMove += d; cm++; }
+        }
+      }
+    }
+    expect(stormMove / sm).toBeLessThan(clearMove / cm);
+  });
+
+  it('camp life is narrated: repulsed attempts and weather holds appear in the feed', () => {
+    let repulseRuns = 0, holdRuns = 0;
+    for (const t of runs) {
+      if (t.events.some((e) => e.activity?.startsWith('Retreating to '))) repulseRuns++;
+      if (t.events.some((e) => e.activity?.startsWith('Waiting out the storm'))) holdRuns++;
+    }
+    expect(repulseRuns / runs.length).toBeGreaterThan(0.6);
+    expect(holdRuns / runs.length).toBeGreaterThan(0.5);
+  });
+
   it('every new template line renders with no unfilled slots', () => {
     const writer = new LineWriter(forkRng('lint-seed', 'lint'));
     const ctx = {
       climber: 'Test Climber', role: 'medic', team: 'Test Team',
       alt: 7000, edge: 'the test line', sherpa: 'Pasang', gap: 3,
+      camp: 'Camp II',
     };
     const pools: readonly string[][] = [
       ...Object.values(DEATH_TEMPLATES).map((p) => [...p]),
@@ -424,6 +466,12 @@ describe('sponsored squads', () => {
       [...SHORT_HANDED],
       [...STORM_ONSET],
       [...STORM_LINES],
+      [...REPULSED_LINES],
+      [...REPULSED_STORM_LINES],
+      [...WEATHER_HOLD_LINES],
+      [...PATIENCE_LINES],
+      [...CAUGHT_WAITING_LINES],
+      [...STORM_GAMBLE_LINES],
     ];
     for (const pool of pools) {
       for (const line of pool) {
