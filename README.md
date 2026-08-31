@@ -3,13 +3,13 @@
 **A very grand way to sort a list.**
 
 Summit is a duck race on an epic scale: give every name in a list a team, race
-them for anywhere from **1 minute to 8 hours**, and let the ending decide the
+them for anywhere from **1 minute to 24 hours**, and let the ending decide the
 order — fantasy draft order, chore duty, who goes first, anything. Friends
 share one link and check in from their phones at any point; there is always
 something happening; and the outcome stays genuinely undecided until the final
 act.
 
-Two themes ship today, both skins over the same fair core:
+Three themes ship today, all skins over the same fair core:
 
 - **🏔 Everest Expedition** — squads of climbers work up the mountain through
   acclimatization rotations, storms, risky-vs-safe route choices, dwindling
@@ -19,6 +19,10 @@ Two themes ship today, both skins over the same fair core:
 - **🏅 The Games** — delegations compete across a full Olympic programme with
   live events, a medal table, and backloaded marquee events; the closing
   event decides gold. Final points table is the result.
+- **🚀 The Mars Run** — crews race 78 million kilometres through slingshots,
+  solar storms, and resupply loops, converging at Mars Approach Staging while
+  the dust storm over the landing site clears, then a powered-descent finale.
+  Order of touchdown is the result.
 
 ## Fairness, precisely
 
@@ -78,6 +82,9 @@ src/themes/olympics/ Event schedule concluding on core checkpoints,
                      integer points tables realizing each standings order,
                      marquee convergence, live within-event lane curves,
                      its own commentary.
+src/themes/space/    The Mars run: journey machinery on a trajectory route
+                     (risk-graded slingshots), orbital loop-backs, crews,
+                     mission-control commentary, starfield map.
 src/lib/             SQLite storage, validation, spoiler-proof slicing.
 src/app/             Landing, create form, race page, API routes.
 src/components/      Race client: server-offset clock, polling, mountain
@@ -86,9 +93,12 @@ src/components/      Race client: server-offset clock, polling, mountain
 ```
 
 Everything about a race is a pure function of `(seed, config)`; the timeline
-is generated once at creation and stored. Clients poll every ~20 s for the
-next slice and render smoothly from a server-synced clock — no websockets,
-no cron, nothing running between requests.
+is generated once at creation and stored. Clients poll on a phase-aware
+cadence (relaxed mid-race, 2 s through the finale) using a `?since=` delta
+cursor, so each poll carries only what's new; rendering runs smoothly from a
+server-synced clock — no websockets, no cron, nothing running between
+requests. The serving lookahead is phased and hard-capped at the final act's
+start, so no convergence-phase data ever ships early.
 
 The narrative layers are generated *after* the outcome is fixed, from
 separate PRNG streams, and only ever explain moves the convergence machinery
