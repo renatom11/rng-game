@@ -33,9 +33,10 @@ When it finishes you have a live site at
 If you would rather not run anything locally, everything except the database
 id can be done from the Cloudflare dashboard:
 
-1. **Storage & Databases → D1 → Create database**, name it `summit`. Copy the
-   database ID it shows you and paste it into `wrangler.jsonc` in place of
-   `REPLACE_WITH_YOUR_D1_DATABASE_ID` (or hand it to Claude to commit).
+1. **The database.** `wrangler.jsonc` already names one, so there is nothing
+   to do here unless you want a different database — in which case create it
+   under **Storage & Databases → D1** and put its ID in `wrangler.jsonc` as
+   `database_id`.
 2. **Workers & Pages → Create → Import a repository**, point it at this repo
    and branch. Set the build command to `npx opennextjs-cloudflare build` and
    the deploy command to `npx opennextjs-cloudflare deploy`. Cloudflare then

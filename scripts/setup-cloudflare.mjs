@@ -126,15 +126,19 @@ async function main() {
   /* 0. dependencies ----------------------------------------------------- */
   if (!existsSync(path.join(ROOT, 'node_modules', 'wrangler'))) {
     step('Installing dependencies');
-    let { code } = await run(NPM, ['install']);
+    // Plain `npm install` on purpose. better-sqlite3 is optional, so a
+    // failed native build is already non-fatal and prints noise you can
+    // ignore. Do NOT reach for --omit=optional to silence it: that flag is
+    // tree-wide, and several build tools (esbuild, workerd, ast-grep) ship
+    // their platform binaries AS optional dependencies, so omitting them
+    // installs a toolchain that cannot run.
+    const { code } = await run(NPM, ['install']);
     if (code !== 0) {
-      // The only native module here is the optional SQLite driver, which
-      // needs a C++ toolchain when no prebuilt binary matches your Node
-      // version. Cloudflare uses D1 instead, so skipping it costs nothing.
-      note('install failed — retrying without the optional native SQLite driver');
-      ({ code } = await run(NPM, ['install', '--omit=optional']));
+      die(
+        'npm install failed — the output above says why.',
+        'If it mentions a missing native binding, delete node_modules and run `npm install` again with no flags.',
+      );
     }
-    if (code !== 0) die('npm install failed — the output above says why.');
     ok('dependencies installed');
   }
 

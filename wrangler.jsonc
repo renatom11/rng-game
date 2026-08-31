@@ -17,7 +17,7 @@
     {
       "binding": "SUMMIT_DB",
       "database_name": "summit",
-      "database_id": "REPLACE_WITH_YOUR_D1_DATABASE_ID",
+      "database_id": "44f541ee-f232-459d-8142-b448c33806b9",
       "migrations_dir": "migrations"
     }
   ],
