@@ -37,12 +37,14 @@ describe('determinism', () => {
     }
   });
 
-  it('handles the extremes: 2 teams / 50 teams, 1 minute / 8 hours', () => {
+  it('handles the extremes: 2 teams / 50 teams, 1 minute / 24 hours', () => {
     for (const [n, d] of [
       [2, 60_000],
       [50, 60_000],
       [2, 28_800_000],
       [50, 28_800_000],
+      [2, 86_400_000],
+      [50, 86_400_000],
     ] as const) {
       const t = generateCore('extremes', { nTeams: n, durationMs: d });
       expect(t.finalOrder).toHaveLength(n);

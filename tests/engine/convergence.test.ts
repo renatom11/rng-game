@@ -160,11 +160,13 @@ describe('convergence & curves', () => {
   });
 
   it('long races: the field is not pinned at the pre-push ceiling for hours', () => {
-    const t = generateCore('long-haul', { nTeams: 10, durationMs: 28_800_000 });
-    // At halfway, nobody should already be parked at the Col ceiling.
-    const gi = t.grid.tMs.findIndex((x) => x >= 14_400_000);
-    for (let i = 0; i < 10; i++) {
-      expect(t.grid.p[i][gi]).toBeLessThan(0.62);
+    for (const dur of [28_800_000, 86_400_000]) {
+      const t = generateCore('long-haul', { nTeams: 10, durationMs: dur });
+      // At halfway, nobody should already be parked at the Col ceiling.
+      const gi = t.grid.tMs.findIndex((x) => x >= dur / 2);
+      for (let i = 0; i < 10; i++) {
+        expect(t.grid.p[i][gi]).toBeLessThan(0.62);
+      }
     }
   });
 });

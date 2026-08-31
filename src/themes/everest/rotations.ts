@@ -53,8 +53,13 @@ function buildCycles(
   nTeams: number,
 ): Cycle[] {
   const colApproachMs = COL_APPROACH_U * durationMs;
-  // 2–4 rotation cycles depending on duration; staggered start per team.
-  const nCycles = durationMs < 300_000 ? 2 : durationMs < 3_600_000 ? 3 : 4;
+  // 2–6 rotation cycles depending on duration; staggered start per team.
+  const nCycles =
+    durationMs < 300_000 ? 2
+    : durationMs < 3_600_000 ? 3
+    : durationMs < 14_400_000 ? 4
+    : durationMs < 43_200_000 ? 5
+    : 6;
   // Stagger: spread team cycle boundaries across ~40% of a cycle length.
   const cycleLen = colApproachMs / nCycles;
   const offset = ((teamIdx / Math.max(1, nTeams)) * 0.4 + rng() * 0.15) * cycleLen;

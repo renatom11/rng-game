@@ -404,7 +404,7 @@ export function buildEvents(input: BuildEventsInput): RaceEvent[] {
 
   // --- Ambient fill to density target + max-gap rule ------------------------
   events.sort((a, b) => a.tMs - b.tMs || a.severity - b.severity);
-  const targetAmbient = Math.min(380, Math.max(28, Math.round(durationMs / 90_000) + 24));
+  const targetAmbient = Math.min(600, Math.max(28, Math.round(durationMs / 90_000) + 24));
   const maxGap = Math.max(45_000, durationMs / 40);
   const ambient: RaceEvent[] = [];
   // Radio chatter must come from the living: never from a wiped team, and

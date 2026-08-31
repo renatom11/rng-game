@@ -25,7 +25,9 @@ export function checkpointTimes(
   durationMs: number,
 ): number[] {
   const rng = forkRng(seedHex, 'checkpoint-times');
-  const count = Math.min(40, Math.max(6, Math.round(durationMs / 480_000)));
+  // Cap 80: at 24h that's a standings beat every ~16 minutes (a cap of 40
+  // left half-hour dead air on very long races).
+  const count = Math.min(80, Math.max(6, Math.round(durationMs / 480_000)));
   const spacing = PUSH_U / count;
   const us: number[] = [];
   for (let k = 1; k <= count; k++) {

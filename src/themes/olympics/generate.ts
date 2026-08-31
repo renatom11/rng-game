@@ -229,7 +229,7 @@ function buildOlyEvents(input: {
 
   // Ambient fill with the same max-gap rule as Everest.
   events.sort((a, b) => a.tMs - b.tMs || a.severity - b.severity);
-  const targetAmbient = Math.min(340, Math.max(24, Math.round(durationMs / 100_000) + 20));
+  const targetAmbient = Math.min(600, Math.max(24, Math.round(durationMs / 100_000) + 20));
   const maxGap = Math.max(45_000, durationMs / 40);
   const ambient: OlympicsRaceEvent[] = [];
   let guard = 0;

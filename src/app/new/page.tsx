@@ -17,7 +17,8 @@ const DURATIONS: [string, number][] = [
   ['10 minutes — coffee break', 600_000],
   ['1 hour — an evening build-up', 3_600_000],
   ['4 hours — an afternoon epic', 14_400_000],
-  ['8 hours — the full expedition', 28_800_000],
+  ['8 hours — the full workday', 28_800_000],
+  ['24 hours — the ultra', 86_400_000],
 ];
 
 export default function NewRacePage() {
@@ -220,7 +221,7 @@ export default function NewRacePage() {
             <input
               type="number"
               min={1}
-              max={480}
+              max={1440}
               placeholder="custom"
               value={customMin}
               onChange={(e) => setCustomMin(e.target.value)}

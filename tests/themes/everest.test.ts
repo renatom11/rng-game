@@ -170,11 +170,12 @@ describe('everest theme', () => {
     for (const [n, dur] of [
       [6, 60_000],
       [10, 3_600_000],
+      [10, 86_400_000],
     ] as const) {
       const t = generateEverest(`density-${n}-${dur}`, cfg(n, dur));
       const times = t.events.map((e) => e.tMs).sort((a, b) => a - b);
       expect(times.length).toBeGreaterThan(30);
-      expect(times.length).toBeLessThan(1500);
+      expect(times.length).toBeLessThan(dur >= 43_200_000 ? 2600 : 1500);
       const maxGap = Math.max(45_000, dur / 40);
       for (let i = 1; i < times.length; i++) {
         expect(times[i] - times[i - 1]).toBeLessThanOrEqual(maxGap);

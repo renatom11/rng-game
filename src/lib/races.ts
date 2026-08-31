@@ -40,7 +40,7 @@ export interface RaceConfigStored {
 }
 
 export const DURATION_MIN_MS = 60_000;
-export const DURATION_MAX_MS = 28_800_000; // 8 hours
+export const DURATION_MAX_MS = 86_400_000; // 24 hours
 
 export class ValidationError extends Error {}
 
@@ -78,7 +78,7 @@ export function validateCreateInput(
 
   const durationMs = Math.round(Number(input.durationMs));
   if (!Number.isFinite(durationMs) || durationMs < DURATION_MIN_MS || durationMs > DURATION_MAX_MS) {
-    throw new ValidationError('duration must be between 1 minute and 8 hours');
+    throw new ValidationError('duration must be between 1 minute and 24 hours');
   }
 
   const demo = Boolean(input.demo);

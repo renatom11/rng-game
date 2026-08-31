@@ -25,7 +25,7 @@ describe('race storage & spoiler-proof serving', () => {
     expect(() => validateCreateInput({ teams: teams(1), durationMs: 60_000 }, NOW)).toThrow(ValidationError);
     expect(() => validateCreateInput({ teams: teams(51), durationMs: 60_000 }, NOW)).toThrow(ValidationError);
     expect(() => validateCreateInput({ teams: teams(4), durationMs: 30_000 }, NOW)).toThrow(ValidationError);
-    expect(() => validateCreateInput({ teams: teams(4), durationMs: 9 * 3_600_000 }, NOW)).toThrow(ValidationError);
+    expect(() => validateCreateInput({ teams: teams(4), durationMs: 25 * 3_600_000 }, NOW)).toThrow(ValidationError);
     expect(() =>
       validateCreateInput(
         { teams: [{ name: 'A' }, { name: 'a' }], durationMs: 60_000 },
