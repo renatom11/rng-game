@@ -136,7 +136,7 @@ export interface PaceEvent {
  * pure decoration on standings the core already decided.
  */
 export interface ChoreoBeat {
-  kind: 'repulsed' | 'hold' | 'stormPush';
+  kind: 'repulsed' | 'hold' | 'stormPush' | 'rest';
   teamIdx: number;
   tMs: number;
   /** The camp frac the beat is anchored to (retreated to / holding at). */
@@ -211,8 +211,17 @@ export function buildDisplayTrack(
       const failRoll = rng();
       const peakF = 0.45 + rng() * 0.3;
       const fail = allowFails && failRoll < (stormy ? 0.75 : 0.35);
-      return { fail, stormy, peakF, beaten: false };
+      return { fail, stormy, peakF, beaten: false, restBeaten: false };
     });
+
+    /** The held storm blowing at t, if any (holds beat everything else). */
+    const activeHeldStorm = (t: number): number => {
+      for (let si = 0; si < storms.length; si++) {
+        if (!holdStorm[si]) continue;
+        if (t >= storms[si].startMs && t <= storms[si].endMs) return si;
+      }
+      return -1;
+    };
 
     const deaths = paceEvents
       .filter((pe) => pe.teamIdx === team && pe.tMs < T_FREE)
@@ -246,98 +255,138 @@ export function buildDisplayTrack(
         x = Math.max(x, lastPos); // monotone during the push
         if (p >= 1 - 1e-6) x = 1; // the summit moment is exact
       } else if (u >= COL_APPROACH_U) {
-        // Converge on the South Col: ease from wherever we are toward C4,
-        // arrival staggered naturally by each team's p.
-        const f = (u - COL_APPROACH_U) / (PUSH_U - COL_APPROACH_U);
-        const ease = f * f * (3 - 2 * f);
-        const target = Math.min(C4_FRAC - 0.002, Math.max(p, lastPos));
-        x = lastPos + (Math.max(target, C4_FRAC - 0.02 - 0.06 * (1 - ease)) - lastPos) * Math.min(1, ease * 1.4);
-        x = Math.min(x, C4_FRAC - 0.002);
-        x = Math.max(x, lastPos - 0.0005); // effectively monotone here
-      } else {
-        // Rotation choreography. Max reach tracks p; oscillate below it.
-        // A squad that lost someone visibly climbs lower for a while.
-        const reach = Math.max(0, Math.min(p, C4_FRAC - 0.02) - lagAt(t));
-        const ci = cycles.findIndex((c) => t >= c.startMs && t < c.endMs);
-        const cycle = ci >= 0 ? cycles[ci] : null;
-        if (!cycle) {
-          x = Math.min(reach, lastPos + 0.004);
-        } else {
-          const cf = (t - cycle.startMs) / (cycle.endMs - cycle.startMs);
-          const [a, dh, d] = cycle.shape;
-          const restFrac =
-            route.restFracs[
-              Math.max(0, restIndexBelow(route.restFracs, reach) - cycle.restDepth)
-            ];
-          let low = Math.min(restFrac, reach);
-          // Short races / shallow themes: keep rest stops close enough.
-          if (durationMs < 900_000 || route.forceShallow) low = Math.max(low, reach - 0.2);
-          if (cf < a) {
-            const f = cf / a;
-            const at = attempts[ci];
-            if (!at.fail) {
-              // clean ascent from low toward reach
-              x = low + (reach - low) * smooth(f);
-            } else {
-              // A failed attempt: push toward the next height, get turned
-              // around partway, retreat to the camp just left, then go
-              // again. The wasted climbing drains the meters (they derive
-              // from motion), which is the whole tradeoff made visible.
-              const peak = low + (reach - low) * at.peakF;
-              const dipTo = low + (reach - low) * 0.06;
-              if (f < 0.45) {
-                x = low + (peak - low) * smooth(f / 0.45);
-              } else if (f < 0.72) {
-                x = peak - (peak - dipTo) * smooth((f - 0.45) / 0.27);
-                if (!at.beaten) {
-                  at.beaten = true;
-                  beats.push({
-                    kind: 'repulsed', teamIdx: team, tMs: t,
-                    campFrac: low, stormy: at.stormy,
-                  });
-                }
-              } else {
-                x = dipTo + (reach - dipTo) * smooth((f - 0.72) / 0.28);
-              }
-            }
-          } else if (cf < a + dh) {
-            x = reach; // dwell high
-          } else if (cf < a + dh + d) {
-            const f = (cf - a - dh) / d;
-            x = reach - (reach - low) * smooth(f);
-          } else {
-            x = low; // dwell low (resting)
-          }
+        // A hold taken during the rotations keeps holding into the approach
+        // while its storm lasts — crossing 0.78 of the race doesn't clear the
+        // sky. But never past the last moment the Col can still be reached
+        // before the push: the closing window forces everyone up eventually.
+        const heldSi = activeHeldStorm(t);
+        let stillHeld = false;
+        if (heldSi >= 0 && stormCamp[heldSi] !== undefined) {
+          const needSteps = (C4_FRAC - 0.02 - stormCamp[heldSi]!) / approachCap;
+          const releaseMs = core.pushStartMs - needSteps * step * 1.4;
+          stillHeld = t <= releaseMs;
         }
+        if (stillHeld) {
+          x = stormCamp[heldSi]!;
+        } else {
+          // Converge on the South Col: ease from wherever we are toward C4,
+          // arrival staggered naturally by each team's p.
+          const f = (u - COL_APPROACH_U) / (PUSH_U - COL_APPROACH_U);
+          const ease = f * f * (3 - 2 * f);
+          const target = Math.min(C4_FRAC - 0.002, Math.max(p, lastPos));
+          x = lastPos + (Math.max(target, C4_FRAC - 0.02 - 0.06 * (1 - ease)) - lastPos) * Math.min(1, ease * 1.4);
+          x = Math.min(x, C4_FRAC - 0.002);
+          x = Math.max(x, lastPos - 0.0005); // effectively monotone here
+        }
+      } else {
+        // A hold takes precedence over everything else in the rotation
+        // phase: a team that decided to sit a storm out IS at its camp,
+        // flat, until the sky clears. (This used to be a one-way clamp
+        // applied after the cycle math, which let the cycle keep walking a
+        // "dug in" team downhill through its own hold — and let a repulse
+        // be narrated for an attempt whose marker never moved.)
+        const heldSi = activeHeldStorm(t);
+        if (heldSi >= 0) {
+          if (stormCamp[heldSi] === undefined) {
+            // Dig in at the camp at/below where the storm caught them — or
+            // exactly where they stand when the race is too short to repay
+            // a descent (the shallow-dip floor exists for a reason).
+            stormCamp[heldSi] =
+              durationMs < 900_000 || route.forceShallow
+                ? Math.round(lastPos * 1e4) / 1e4
+                : route.restFracs[restIndexBelow(route.restFracs, lastPos + 0.005)];
+          }
+          x = stormCamp[heldSi]!;
+          if (!holdBeaten[heldSi]) {
+            holdBeaten[heldSi] = true;
+            beats.push({
+              kind: 'hold', teamIdx: team, tMs: Math.max(t, storms[heldSi].startMs),
+              campFrac: stormCamp[heldSi]!, stormy: true,
+            });
+          }
+        } else {
+          // Rotation choreography. Max reach tracks p; oscillate below it.
+          // A squad that lost someone visibly climbs lower for a while.
+          const reach = Math.max(0, Math.min(p, C4_FRAC - 0.02) - lagAt(t));
+          const ci = cycles.findIndex((c) => t >= c.startMs && t < c.endMs);
+          const cycle = ci >= 0 ? cycles[ci] : null;
+          let cleanAscent = false;
+          if (!cycle) {
+            x = Math.min(reach, lastPos + 0.004);
+          } else {
+            const cf = (t - cycle.startMs) / (cycle.endMs - cycle.startMs);
+            const [a, dh, d] = cycle.shape;
+            const restFrac =
+              route.restFracs[
+                Math.max(0, restIndexBelow(route.restFracs, reach) - cycle.restDepth)
+              ];
+            let low = Math.min(restFrac, reach);
+            // Short races / shallow themes: keep rest stops close enough.
+            if (durationMs < 900_000 || route.forceShallow) low = Math.max(low, reach - 0.2);
+            const at = attempts[ci];
+            if (cf < a) {
+              const f = cf / a;
+              if (!at.fail) {
+                // clean ascent from low toward reach
+                cleanAscent = true;
+                x = low + (reach - low) * smooth(f);
+              } else {
+                // A failed attempt: push toward the next height, get turned
+                // around partway, retreat to the camp just left, then go
+                // again. The wasted climbing drains the meters (they derive
+                // from motion), which is the whole tradeoff made visible.
+                const peak = low + (reach - low) * at.peakF;
+                const dipTo = low + (reach - low) * 0.06;
+                if (f < 0.45) {
+                  x = low + (peak - low) * smooth(f / 0.45);
+                } else if (f < 0.72) {
+                  x = peak - (peak - dipTo) * smooth((f - 0.45) / 0.27);
+                  if (!at.beaten) {
+                    at.beaten = true;
+                    beats.push({
+                      kind: 'repulsed', teamIdx: team, tMs: t,
+                      campFrac: low, stormy: at.stormy,
+                    });
+                  }
+                } else {
+                  x = dipTo + (reach - dipTo) * smooth((f - 0.72) / 0.28);
+                }
+              }
+            } else if (cf < a + dh) {
+              x = reach; // dwell high
+            } else if (cf < a + dh + d) {
+              const f = (cf - a - dh) / d;
+              x = reach - (reach - low) * smooth(f);
+              // A deliberate recovery descent is a story, not a glitch —
+              // narrate the deep ones so "why are they going DOWN?" has an
+              // answer in the feed.
+              if (!at.restBeaten && reach - low > 0.12) {
+                at.restBeaten = true;
+                beats.push({
+                  kind: 'rest', teamIdx: team, tMs: t,
+                  campFrac: low, stormy: false,
+                });
+              }
+            } else {
+              x = low; // dwell low (resting)
+            }
+          }
 
-        // Weather: teams that chose to sit a storm out hold flat at the
-        // camp they were at when it rolled in — and spring, rested, when it
-        // breaks. Teams that gambled keep moving through it (their attempt
-        // plans already made failure much more likely).
-        for (let si = 0; si < storms.length; si++) {
-          const s = storms[si];
-          if (t < s.startMs || t > s.endMs) continue;
-          if (!holdStorm[si]) {
-            if (!pushBeaten[si] && x > lastPos + 0.0008) {
+          // Storm gamble: narrated only when the gamble is actually going to
+          // pay. A storm-crossed attempt scripted to fail gets its repulse
+          // narrated instead — never "got away with it" minutes before a
+          // retreat.
+          for (let si = 0; si < storms.length; si++) {
+            const s = storms[si];
+            if (holdStorm[si] || pushBeaten[si]) continue;
+            if (t < s.startMs || t > s.endMs) continue;
+            if (cleanAscent && x > lastPos + 0.0008) {
               pushBeaten[si] = true;
               beats.push({
                 kind: 'stormPush', teamIdx: team, tMs: t,
                 campFrac: lastPos, stormy: true,
               });
             }
-            continue;
-          }
-          if (stormCamp[si] === undefined) {
-            stormCamp[si] =
-              route.restFracs[restIndexBelow(route.restFracs, lastPos + 0.005)];
-          }
-          if (x > stormCamp[si]!) x = stormCamp[si]!;
-          if (!holdBeaten[si]) {
-            holdBeaten[si] = true;
-            beats.push({
-              kind: 'hold', teamIdx: team, tMs: Math.max(t, s.startMs),
-              campFrac: stormCamp[si]!, stormy: true,
-            });
           }
         }
       }

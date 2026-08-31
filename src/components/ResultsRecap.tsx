@@ -7,6 +7,7 @@ import { deathCauseLabel } from '@/lib/client/causeLabels';
 import { fmtClock } from './useRaceClock';
 import { ShareLink } from './Countdown';
 import ClimberPortrait from './ClimberPortrait';
+import Link from 'next/link';
 
 interface Props {
   snap: JourneySnapshot;
@@ -115,6 +116,34 @@ export function ResultsRecap({ snap, jt, teamNames, title, onReplay }: Props) {
           </li>
         ))}
       </ol>
+
+      <div className="results-footer">
+        <Link className="cta cta-ghost" href="/">← Back to Summit</Link>
+        <Link className="cta cta-ghost" href="/new">Plan another race</Link>
+        <button
+          className="cta cta-ghost"
+          onClick={() => {
+            // Everything a finished race is, in one file: the full snapshot
+            // (events, tracks, squads, storms, results) plus the naming.
+            const payload = {
+              format: 'summit-replay-v1',
+              exported: new Date().toISOString(),
+              title,
+              teams: teamNames,
+              snapshot: snap,
+            };
+            const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${(title || 'summit-replay').replace(/[^\w-]+/g, '-').toLowerCase()}.json`;
+            a.click();
+            setTimeout(() => URL.revokeObjectURL(url), 4000);
+          }}
+        >
+          Download replay (JSON)
+        </button>
+      </div>
     </div>
   );
 }

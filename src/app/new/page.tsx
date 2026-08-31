@@ -25,12 +25,11 @@ export default function NewRacePage() {
   const router = useRouter();
   const [theme, setTheme] = useState<'everest' | 'olympics' | 'space'>('everest');
   const [title, setTitle] = useState('');
-  const [teams, setTeams] = useState<TeamRow[]>([
-    { name: '', style: '' },
-    { name: '', style: '' },
-    { name: '', style: '' },
-    { name: '', style: '' },
-  ]);
+  const [teams, setTeams] = useState<TeamRow[]>(
+    // Twelve rows out of the box — the size of a standard draft — and any
+    // left blank are simply dropped on submit.
+    Array.from({ length: 12 }, () => ({ name: '', style: '' as Style })),
+  );
   const [durationMs, setDurationMs] = useState(3_600_000);
   const [customMin, setCustomMin] = useState('');
   const [startMode, setStartMode] = useState<'soon' | 'at'>('soon');

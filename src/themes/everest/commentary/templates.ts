@@ -325,3 +325,19 @@ export const PHASE_NAMES = [
   'the weather window and the South Col',
   'the summit push',
 ];
+
+/** A deliberate recovery descent — the "climb high, sleep low" rotation. */
+export const ROTATION_LINES = [
+  '{team} start down for {camp}. Climb high, sleep low — height up here is earned in the valleys.',
+  '{team} turn their backs on the height and drop toward {camp}: eat, sleep, let the blood thicken.',
+  'Rest rotation for {team} — down to {camp}. Every metre surrendered today is strength banked for the push.',
+  '{team} head down to {camp} on schedule. The mountain does not reward the impatient.',
+  'Radio from {team}: "going down to breathe." {camp} tonight, higher next week.',
+] as const;
+
+/** Said once, the first time the board visibly pours back downhill. */
+export const FIRST_ROTATION_LINES = [
+  'The rotations begin. From here squads climb high and sleep low, falling back down the mountain again and again — it looks like retreat, but each descent buys the acclimatization the summit demands.',
+  'First rotation of the season: do not be alarmed watching teams pour back toward the valley. Climb high, sleep low is how lungs learn 8,000 metres.',
+  'And down they go — the classic rhythm starts. Teams will yo-yo between the camps for days; the ones resting lowest are often the ones charging highest next.',
+] as const;

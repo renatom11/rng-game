@@ -31,7 +31,7 @@ export const NODES: RouteNode[] = [
   { id: 'C1', label: 'Camp I', alt: 6065, frac: 0.16 },
   { id: 'C2', label: 'Camp II', alt: 6400, frac: 0.32 },
   { id: 'C3', label: 'Camp III', alt: 7160, frac: 0.52 },
-  { id: 'C4', label: 'Camp IV · South Col', alt: 7950, frac: 0.7 },
+  { id: 'C4', label: 'Camp IV', alt: 7950, frac: 0.7 },
   { id: 'BALC', label: 'The Balcony', alt: 8400, frac: 0.82 },
   { id: 'SSUM', label: 'South Summit', alt: 8749, frac: 0.92 },
   { id: 'HILL', label: 'Hillary Step', alt: 8790, frac: 0.96 },

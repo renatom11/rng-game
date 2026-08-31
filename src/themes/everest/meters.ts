@@ -159,12 +159,18 @@ export function recomputeReadiness(values: number[][][]): void {
       }
     }
     for (let i = 0; i < rows[O2].length; i++) {
+      // Energy dominates on purpose: it is the one meter that visibly
+      // drains climbing and refills at rest, so readiness now SWINGS with
+      // the rotation story instead of hovering — a squad down at Base Camp
+      // is watchably recharging for the next push. (The old blend weighted
+      // three near-constant meters at 0.7 combined, which pinned the number
+      // to a lifeless 65-75 band all race.)
       rows[READY][i] = Math.round(
         clamp(
-          0.28 * rows[O2][i] +
-            0.3 * rows[ENERGY][i] +
-            0.27 * rows[ACCL][i] +
-            0.15 * rows[MORALE][i],
+          0.55 * rows[ENERGY][i] +
+            0.2 * rows[ACCL][i] +
+            0.15 * rows[O2][i] +
+            0.1 * rows[MORALE][i],
         ),
       );
     }

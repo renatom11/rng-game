@@ -87,7 +87,13 @@ export function RaceClient({ slug }: { slug: string }) {
 
   const snap = view.snapshot;
   const realNow = Date.now() + offsetMs;
-  const realT = Math.max(0, Math.min(durationMs, realNow - startAt));
+  // Live races render a few seconds behind the wall clock, like any sports
+  // broadcast. The serving horizon in the finale is deliberately tiny
+  // (spoiler-proofing), so a display drawn AT the horizon keeps exhausting
+  // its data between polls — markers advance, freeze, jump. Drawing behind
+  // the horizon keeps track data ahead of the pen at all times.
+  const LIVE_LAG_MS = 3_200;
+  const realT = Math.max(0, Math.min(durationMs, realNow - startAt - LIVE_LAG_MS));
   const tMs = virtual ? clock.tMs : realT;
 
   const scheduled = !virtual && realNow < startAt;

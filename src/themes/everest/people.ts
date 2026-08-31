@@ -245,9 +245,10 @@ export const SHERPA_HERITAGE = {
 };
 
 const JOBS = [
-  'schoolteacher', 'glacier guide', 'carpenter', 'ER nurse', 'physicist',
-  'photographer', 'farmer', 'firefighter', 'cartographer', 'chef',
-  'software engineer', 'geologist',
+  'schoolteacher', 'wedding DJ', 'submarine chef', 'mall Santa',
+  'competitive dog groomer', 'mattress tester', 'crossword setter',
+  'elevator inspector', 'artisanal pickle maker', 'birthday clown',
+  'mini-golf course architect', 'bounce-house installer',
 ];
 
 const PEAKS = [
@@ -256,35 +257,37 @@ const PEAKS = [
 ];
 
 const QUIRKS = [
-  'carries the same lucky carabiner on every climb',
-  'writes a postcard home from every camp',
-  'hums show tunes on fixed lines',
-  'refuses to move before morning tea',
-  'names every crevasse ladder',
-  'keeps a pebble from each summit',
-  'reads Tolstoy at altitude',
-  'talks to the mountain, quietly, when the wind drops',
+  'brought a full-size waffle iron and will not discuss it',
+  'once lost a fight with a goose and still brings it up',
+  'practices summit poses in the tent every night',
+  'named the ice axe Greg and introduces it before themselves',
+  'keeps trying to order delivery to Camp II',
+  'trained by walking up the down escalator for a year',
+  'packed fourteen pairs of socks and zero gloves',
+  'is here entirely to win an argument from 2019',
+  'refuses to acknowledge Tuesdays above 7,000 metres',
+  'whispers "you first" to the mountain every morning',
 ];
 
 const BIO_TEMPLATES = [
   '{job} from {hometown}; {quirk}.',
-  'Summited {peak} three winters ago and never quite came down.',
-  'A {job} who saves all year for expedition season; {quirk}.',
-  'Learned ropework on {peak}; {quirk}.',
-  'From {hometown} — first laced boots at twelve, first frostbite at twenty.',
-  'Ex-{job}. Sold the business, bought the permit.',
+  'Summited {peak} once by accident while looking for the bathroom.',
+  'A {job} who told the office this is a team-building retreat; {quirk}.',
+  'Learned ropework from a YouTube channel about boats; {quirk}.',
+  'From {hometown} — trained in a parking garage stairwell; fears nothing except pigeons.',
+  'Ex-{job}. Sold the business, bought the permit, kept the name tag.',
   '{quirk}. The squad stopped asking why.',
-  'Two attempts on {peak}, both turned back by weather. This one is personal.',
+  'Turned back on {peak} twice: once for weather, once for a sandwich left in the car.',
   'The calm one — {job} by trade; {quirk}.',
-  'From {hometown}; promised the family this is the last big one. Again.',
+  'From {hometown}; swore to the family this is the last one. Fourth year running.',
 ];
 
 const SIRDAR_BIOS = [
-  'Eleven seasons above eight thousand metres; still counts every prayer flag.',
-  'Runs the family teahouse in {hometown} between seasons.',
-  'Learned the Icefall from an uncle who learned it from his.',
-  'Has carried loads since fourteen; reads weather like other people read mood.',
-  'The mountain is an office; {hometown} is home.',
+  'Eleven seasons above eight thousand metres; has opinions about your boots.',
+  'Runs the family teahouse in {hometown}; finds Everest more restful.',
+  'Learned the Icefall from an uncle who learned it from his. The Icefall has learned nothing.',
+  'Reads weather like other people read menus, and is never wrong twice.',
+  'Has summited more times than these clients have packed correctly.',
 ];
 
 function fillBio(rng: RNG, template: string, hometown: string): string {

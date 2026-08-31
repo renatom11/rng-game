@@ -18,6 +18,7 @@ import {
   markerXY,
 } from '@/themes/everest/map-geometry';
 import { NODES } from '@/themes/everest/route';
+import { deathCauseLabel } from '@/lib/client/causeLabels';
 
 const SEG_BY_EDGE = new Map(EDGE_GEOMETRY.map((e) => [e.id, e.segIdx]));
 
@@ -58,9 +59,12 @@ export function MountainMap({ snap, teamNames, tMs, selected, onSelect, finale }
       const [x, y] = markerXY(pos, choices[i]);
       return { teamIdx: i, pos, x, y };
     });
-    const buckets = new Map<number, typeof raw>();
+    // Fan out only dots that genuinely overlap ON SCREEN. Bucketing by
+    // progress alone shoved teams sideways even when their chosen routes
+    // already separated them — which read as dots wandering off their line.
+    const buckets = new Map<string, typeof raw>();
     for (const m of raw) {
-      const key = Math.round(m.pos * 160);
+      const key = `${Math.round(m.x / 24)}:${Math.round(m.y / 18)}`;
       const arr = buckets.get(key) ?? [];
       arr.push(m);
       buckets.set(key, arr);
@@ -70,8 +74,8 @@ export function MountainMap({ snap, teamNames, tMs, selected, onSelect, finale }
       arr.sort((a, b) => a.teamIdx - b.teamIdx);
       arr.forEach((m, i) => {
         const spread = i - (arr.length - 1) / 2;
-        m.x += spread * 30;
-        m.y += Math.abs(spread) * 4;
+        m.x += spread * Math.min(16, 120 / arr.length);
+        m.y += Math.abs(spread) * 3;
       });
     }
     return raw;
@@ -80,7 +84,10 @@ export function MountainMap({ snap, teamNames, tMs, selected, onSelect, finale }
   // Where people were lost: a small red ✕ stays on the mountain at each
   // death site (delivered events only — the map can never foreshadow).
   const deathMarks = useMemo(() => {
-    const out: { x: number; y: number; big: boolean; key: string }[] = [];
+    const out: {
+      x: number; y: number; big: boolean; key: string;
+      color: string; teamIdx: number; label: string;
+    }[] = [];
     for (const e of snap.events) {
       if (e.tMs > tMs) break;
       if (e.type !== 'climber_fall' && e.type !== 'team_wipeout') continue;
@@ -89,16 +96,25 @@ export function MountainMap({ snap, teamNames, tMs, selected, onSelect, finale }
       const ch = edgeChoicesAt(snap, n, e.tMs, SEG_BY_EDGE)[e.teamIdx];
       const [x, y] = markerXY(pos, ch);
       const idx = out.length;
+      const team = teamNames[e.teamIdx] ?? `Team ${e.teamIdx + 1}`;
+      const cause = deathCauseLabel(e.cause);
+      const label =
+        e.type === 'team_wipeout'
+          ? `${team} — the whole expedition, lost. ${cause}`
+          : `${snap.climbers[e.teamIdx]?.[e.climberIdx ?? -1]?.name ?? 'A climber'} · ${team} — ${cause}`;
       out.push({
         x: x + ((idx % 3) - 1) * 9,
         y: y + (idx % 2) * 7 - 3,
         big: e.type === 'team_wipeout',
         key: `${e.tMs}-${e.teamIdx}-${e.climberIdx ?? 'w'}`,
+        color: snap.colors[e.teamIdx],
+        teamIdx: e.teamIdx,
+        label,
       });
     }
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [snap, n, Math.floor(tMs / 2000)]);
+  }, [snap, n, teamNames, Math.floor(tMs / 2000)]);
 
   // An edge is lit when some team's current-segment choice matches it.
   const activeEdges = useMemo(() => {
@@ -114,6 +130,36 @@ export function MountainMap({ snap, teamNames, tMs, selected, onSelect, finale }
     }
     return set;
   }, [markers, choices, n]);
+
+  // Storm intensity right now, eased in/out at the edges, for the blizzard.
+  const stormIntensity = useMemo(() => {
+    let best = 0;
+    for (const st of snap.storms ?? []) {
+      const len = st.endMs - st.startMs;
+      const edge = Math.max(2_000, Math.min(60_000, len * 0.2));
+      const ramp = Math.min(
+        1,
+        Math.max(0, (tMs - (st.startMs - edge)) / edge),
+        Math.max(0, (st.endMs + edge - tMs) / edge),
+      );
+      best = Math.max(best, ramp);
+    }
+    return best;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [snap.storms, Math.floor(tMs / 1000)]);
+
+  // Deterministic flake field (no randomness at render time).
+  const flakes = useMemo(
+    () =>
+      Array.from({ length: 64 }, (_, i) => ({
+        x: (i * 173) % (VIEW_W + 200) - 100,
+        y: ((i * 97) % (VIEW_H + 300)) - 150,
+        len: 7 + (i % 5) * 3,
+        dur: 2.4 + ((i * 31) % 17) / 10,
+        delay: -(((i * 53) % 40) / 10),
+      })),
+    [],
+  );
 
   // Finale zoom: show the Col -> Summit portion.
   const zoom = finale
@@ -193,7 +239,7 @@ export function MountainMap({ snap, teamNames, tMs, selected, onSelect, finale }
               />
               <text
                 x={x + (node.id === 'SUMMIT' ? -12 : 14)}
-                y={y - (node.id === 'SUMMIT' ? 14 : major ? -4 : -2)}
+                y={y - (node.id === 'SUMMIT' ? 16 : major ? 3 : 2)}
                 textAnchor={node.id === 'SUMMIT' ? 'end' : 'start'}
                 className={major ? 'mtn-label' : 'mtn-label mtn-label-minor'}
               >
@@ -201,7 +247,7 @@ export function MountainMap({ snap, teamNames, tMs, selected, onSelect, finale }
               </text>
               <text
                 x={x + (node.id === 'SUMMIT' ? -12 : 14)}
-                y={y + (node.id === 'SUMMIT' ? 0 : major ? 12 : 10)}
+                y={y + (node.id === 'SUMMIT' ? -2 : major ? 15 : 12)}
                 textAnchor={node.id === 'SUMMIT' ? 'end' : 'start'}
                 className="mtn-alt"
               >
@@ -211,18 +257,47 @@ export function MountainMap({ snap, teamNames, tMs, selected, onSelect, finale }
           );
         })}
 
-        {/* Death sites */}
+        {/* Death sites — hover (or tap) for who, which team, and how */}
         {deathMarks.map((d) => (
-          <text
+          <g
             key={d.key}
-            x={d.x}
-            y={d.y}
-            textAnchor="middle"
-            className={`mtn-death${d.big ? ' mtn-death-big' : ''}`}
+            className="mtn-death-site"
+            onClick={(ev) => {
+              ev.stopPropagation();
+              onSelect(selected === d.teamIdx ? null : d.teamIdx);
+            }}
           >
-            ✕
-          </text>
+            <title>{d.label}</title>
+            <circle cx={d.x} cy={d.y - 3} r={9} fill="transparent" />
+            <text
+              x={d.x}
+              y={d.y}
+              textAnchor="middle"
+              style={{ fill: d.color }}
+              className={`mtn-death${d.big ? ' mtn-death-big' : ''}`}
+            >
+              ✕
+            </text>
+          </g>
         ))}
+
+        {/* Blizzard: the sky closing in while a storm window is open */}
+        {stormIntensity > 0 && (
+          <g className="mtn-blizzard" opacity={stormIntensity} aria-hidden>
+            <rect x={-100} y={-100} width={VIEW_W + 200} height={VIEW_H + 200} fill="#aebfd6" opacity={0.16} />
+            {flakes.map((fl, i) => (
+              <line
+                key={i}
+                x1={fl.x}
+                y1={fl.y}
+                x2={fl.x - fl.len * 0.7}
+                y2={fl.y + fl.len}
+                className="mtn-flake"
+                style={{ animationDuration: `${fl.dur}s`, animationDelay: `${fl.delay}s` }}
+              />
+            ))}
+          </g>
+        )}
 
         {/* Team markers */}
         {markers.map((m) => {

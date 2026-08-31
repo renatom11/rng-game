@@ -4,7 +4,7 @@ import type { DeathCause } from '@/themes/everest/types';
 export const DEATH_CAUSE_LABELS: Record<DeathCause, string> = {
   'fall-crevasse': 'Crevasse fall',
   'fall-serac': 'Serac collapse',
-  'fall-face': 'Fell on the face',
+  'fall-face': 'Tumbled down the mountain',
   froze: 'Died of exposure',
   exhaustion: 'Exhaustion',
   altitude: 'Altitude sickness',

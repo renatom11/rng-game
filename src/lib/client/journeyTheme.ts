@@ -26,6 +26,8 @@ export interface JourneyTheme {
   motion: {
     up: string;
     down: string;
+    /** descending with a destination, e.g. "Down to Camp II to recover" */
+    downTo?: (waypoint: string) => string;
     restingAt: (waypoint: string) => string;
     holding: string;
     preparing: string;
@@ -65,6 +67,7 @@ export const EVEREST_JOURNEY: JourneyTheme = {
   motion: {
     up: 'Climbing',
     down: 'Descending to rest',
+    downTo: (w) => `Down to ${w} to recover`,
     restingAt: (w) => `Resting at ${w}`,
     holding: 'Holding position',
     preparing: 'Preparing at Base Camp',

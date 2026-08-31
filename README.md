@@ -154,7 +154,7 @@ didn't already decide.
 
 ## Testing
 
-`npm test` runs 97 tests: byte-level determinism, chi-square uniformity,
+`npm test` runs 101 tests: byte-level determinism, chi-square uniformity,
 pairwise head-to-head balance, reachability cell coverage, convergence rank
 bounds through the finale, monotonicity/no-teleport guards, resource-range
 and continuity checks, wipeout placement constraints, event-density and

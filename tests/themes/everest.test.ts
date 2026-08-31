@@ -18,6 +18,8 @@ import {
   STORM_ONSET,
   WEATHER_HOLD_LINES,
   WIPEOUT_TEMPLATES,
+  ROTATION_LINES,
+  FIRST_ROTATION_LINES,
 } from '@/themes/everest/commentary/templates';
 import { LineWriter } from '@/lib/linewriter';
 import { forkRng } from '@/engine/prng';
@@ -472,6 +474,8 @@ describe('sponsored squads', () => {
       [...PATIENCE_LINES],
       [...CAUGHT_WAITING_LINES],
       [...STORM_GAMBLE_LINES],
+      [...ROTATION_LINES],
+      [...FIRST_ROTATION_LINES],
     ];
     for (const pool of pools) {
       for (const line of pool) {
@@ -480,3 +484,90 @@ describe('sponsored squads', () => {
     }
   });
 });
+
+describe('storm holds and rotation narration', () => {
+  const esc = (x: string) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const templateRe = (line: string) =>
+    new RegExp('^' + line.split(/\{\w+\}/).map(esc).join('[\\s\\S]*') + '$');
+
+  it('a holding team is pinned at its camp for the whole storm — never walked downhill through its own hold, never "repulsed" while flat', () => {
+    const D = 3_600_000;
+    const core = generateCore('hold-seed-1', { nTeams: 8, durationMs: D });
+    const storms = [
+      { startMs: D * 0.3, endMs: D * 0.36 },
+      { startMs: D * 0.62, endMs: D * 0.68 },
+    ];
+    const styles = Array.from({ length: 8 }, () => 'cautious' as const);
+    const { tMs, pos, beats } = buildDisplayTrack(
+      forkRng('hold-seed-1', 'rotations'), core, D, undefined, [], storms, styles,
+    );
+    const holds = beats.filter((b) => b.kind === 'hold');
+    expect(holds.length).toBeGreaterThan(0);
+    for (const h of holds) {
+      const storm = storms.find((st) => h.tMs >= st.startMs && h.tMs <= st.endMs)!;
+      expect(storm).toBeTruthy();
+      let reached = false;
+      for (let i = 0; i < tMs.length; i++) {
+        const t = tMs[i];
+        if (t < h.tMs || t > storm.endMs) continue;
+        if (t / D >= 0.78) break;
+        const x = pos[h.teamIdx][i];
+        expect(x).toBeGreaterThanOrEqual(h.campFrac - 1e-6);
+        if (!reached && Math.abs(x - h.campFrac) < 1e-6) reached = true;
+        if (reached) expect(Math.abs(x - h.campFrac)).toBeLessThan(1e-6);
+      }
+      expect(
+        beats.some(
+          (b) => b.kind === 'repulsed' && b.teamIdx === h.teamIdx &&
+            b.tMs >= h.tMs && b.tMs <= storm.endMs && b.tMs / D < 0.78,
+        ),
+      ).toBe(false);
+    }
+  });
+
+  it('a hold survives crossing into the Col approach while its storm still blows — and everyone still summits', () => {
+    const D = 3_600_000;
+    const core = generateCore('hold-seed-2', { nTeams: 6, durationMs: D });
+    const storms = [{ startMs: D * 0.74, endMs: D * 0.84 }];
+    const styles = Array.from({ length: 6 }, () => 'cautious' as const);
+    const { tMs, pos, beats } = buildDisplayTrack(
+      forkRng('hold-seed-2', 'rotations'), core, D, undefined, [], storms, styles,
+    );
+    const holds = beats.filter((b) => b.kind === 'hold');
+    expect(holds.length).toBeGreaterThan(0);
+    for (const h of holds) {
+      // Just past the 0.78 phase line, the storm is still on: still pinned.
+      const i79 = tMs.findIndex((t) => t >= D * 0.79);
+      expect(Math.abs(pos[h.teamIdx][i79] - h.campFrac)).toBeLessThan(1e-6);
+    }
+    for (let team = 0; team < 6; team++) {
+      expect(pos[team][pos[team].length - 1]).toBe(1);
+    }
+  });
+
+  it('the wait-vs-go ledger never predates the checkpoint whose standings it narrates', () => {
+    const patterns = [...PATIENCE_LINES, ...CAUGHT_WAITING_LINES].map(templateRe);
+    let matched = 0;
+    for (const t of runs) {
+      const storms = t.storms ?? [];
+      for (const e of t.events) {
+        if (!patterns.some((re) => re.test(e.text))) continue;
+        matched++;
+        const storm = [...storms].filter((st) => st.endMs <= e.tMs).pop();
+        expect(storm).toBeTruthy();
+        expect(
+          t.core.checkpoints.some((cp) => cp.tMs >= storm!.endMs && cp.tMs <= e.tMs),
+        ).toBe(true);
+      }
+    }
+    expect(matched).toBeGreaterThan(0);
+  });
+
+  it('deliberate recovery descents are narrated, so going down reads as strategy', () => {
+    const withRest = runs.filter((t) =>
+      t.events.some((e) => e.activity?.startsWith('Down to ')),
+    );
+    expect(withRest.length / runs.length).toBeGreaterThan(0.3);
+  });
+});
+

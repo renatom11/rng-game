@@ -181,6 +181,8 @@ export interface ClimberDeath {
 
 export interface TeamLiveState {
   activity: string;
+  /** Coarse visual state for at-a-glance icons: what is this team DOING? */
+  motionKind: 'prep' | 'up' | 'down' | 'rest' | 'hold' | 'storm' | 'done' | 'wiped';
   edgeId: string | null;
   wiped: boolean;
   climberStatus: ClimberStatus[];
@@ -197,6 +199,7 @@ export function teamStatesAt(
 ): TeamLiveState[] {
   const states: TeamLiveState[] = Array.from({ length: nTeams }, (_, i) => ({
     activity: jt.motion.preparing,
+    motionKind: 'prep' as const,
     edgeId: null,
     wiped: false,
     climberStatus: snap.climbers[i].map(() => 'climbing' as ClimberStatus),
@@ -228,13 +231,17 @@ export function teamStatesAt(
     }
     if (e.type === 'team_wipeout') {
       s.wiped = true;
+      s.motionKind = 'wiped';
       s.climberStatus = s.climberStatus.map((c, ci) => {
         if (c === 'turned-back') return c;
         if (s.deaths[ci] === null) s.deaths[ci] = { tMs: e.tMs, cause: e.cause };
         return 'fallen';
       });
     }
-    if (e.type === 'summit') s.activity = jt.finishedActivity;
+    if (e.type === 'summit') {
+      s.activity = jt.finishedActivity;
+      s.motionKind = 'done';
+    }
   }
 
   // Motion-aware activity: event-carried labels go stale between throttled
@@ -260,18 +267,28 @@ export function teamStatesAt(
     if (d > thresh) {
       // keep a route label if one is current, else the generic moving verb
       if (!s.activity.startsWith('On ')) s.activity = jt.motion.up;
+      s.motionKind = 'up';
     } else if (d < -thresh) {
-      s.activity = jt.motion.down;
+      // Name where they are headed: an unexplained descent is the single
+      // most confusing thing on the board ("why are they going DOWN?").
+      const below = jt.waypointAt(Math.max(0, pos - 0.005));
+      s.activity = jt.motion.downTo ? jt.motion.downTo(below.label) : jt.motion.down;
+      s.motionKind = 'down';
     } else {
       const wp = jt.waypointAt(pos + 0.015);
       const inStorm =
         jt.motion.holdingStorm !== undefined &&
         (snap.storms ?? []).some((st) => tMs >= st.startMs && tMs <= st.endMs);
-      s.activity = inStorm
-        ? jt.motion.holdingStorm!(Math.abs(wp.frac - pos) < 0.02 ? wp.label : 'altitude')
-        : Math.abs(wp.frac - pos) < 0.02
-          ? jt.motion.restingAt(wp.label)
-          : jt.motion.holding;
+      if (inStorm) {
+        s.activity = jt.motion.holdingStorm!(Math.abs(wp.frac - pos) < 0.02 ? wp.label : 'altitude');
+        s.motionKind = 'storm';
+      } else if (Math.abs(wp.frac - pos) < 0.02) {
+        s.activity = jt.motion.restingAt(wp.label);
+        s.motionKind = pos < 0.01 ? 'prep' : 'rest';
+      } else {
+        s.activity = jt.motion.holding;
+        s.motionKind = 'hold';
+      }
     }
   }
   return states;

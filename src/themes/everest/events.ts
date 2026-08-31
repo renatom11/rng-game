@@ -11,6 +11,8 @@ import type { Risk } from './route';
 import { LineWriter } from '@/lib/linewriter';
 import {
   CAUGHT_WAITING_LINES,
+  FIRST_ROTATION_LINES,
+  ROTATION_LINES,
   DEATH_TEMPLATES,
   PATIENCE_LINES,
   PHASE_NAMES,
@@ -155,6 +157,8 @@ export function buildEvents(input: BuildEventsInput): RaceEvent[] {
           activity: `Resting at ${camp.label}`,
           text: line('camp_arrival', { ...ctxFor(team), camp: camp.label, alt: camp.alt }),
         });
+        // Making a camp is worth something you can see on the bars.
+        nudgeMeter(meters, team, METER_INDEX.MORALE, times, t, 5);
         lastEmit = t;
       } else if (newMode === 'down' && mode !== 'down') {
         events.push({
@@ -458,6 +462,8 @@ export function buildEvents(input: BuildEventsInput): RaceEvent[] {
   // --- Camp-life beats: repulsed attempts, weather holds, storm gambles ----
   const campLabelAt = (frac: number) => nodeAtOrBelow(frac + 0.01).label;
   const beatCount = new Map<number, number>();
+  const restCount = new Map<number, number>();
+  let rotationExplained = false;
   for (const b of beats) {
     const wipeAt = wipedAt.get(b.teamIdx);
     if (wipeAt !== undefined && b.tMs >= wipeAt) continue;
@@ -481,7 +487,28 @@ export function buildEvents(input: BuildEventsInput): RaceEvent[] {
         activity: `Waiting out the storm at ${camp}`,
         text: writer.render('radio:weatherhold', WEATHER_HOLD_LINES, ctx),
       });
-    } else {
+    } else if (b.kind === 'rest') {
+      // The deliberate recovery descent, explained. The first one in the
+      // race gets a louder scene-setting line (it is the moment the whole
+      // board starts pouring back downhill and viewers reach for the rules).
+      const seenRest = restCount.get(b.teamIdx) ?? 0;
+      if (!rotationExplained) {
+        rotationExplained = true;
+        restCount.set(b.teamIdx, seenRest + 1);
+        events.push({
+          tMs: b.tMs, type: 'radio', teamIdx: b.teamIdx, severity: 2,
+          activity: `Down to ${camp} to recover`,
+          text: writer.render('radio:firstrotation', FIRST_ROTATION_LINES, ctx),
+        });
+      } else if (seenRest < 2) {
+        restCount.set(b.teamIdx, seenRest + 1);
+        events.push({
+          tMs: b.tMs, type: 'radio', teamIdx: b.teamIdx, severity: 1,
+          activity: `Down to ${camp} to recover`,
+          text: writer.render('radio:rotation', ROTATION_LINES, ctx),
+        });
+      }
+    } else if (b.kind === 'stormPush') {
       events.push({
         tMs: b.tMs, type: 'surge', teamIdx: b.teamIdx, severity: 2,
         text: writer.render('surge:stormgamble', STORM_GAMBLE_LINES, ctx),
@@ -508,7 +535,14 @@ export function buildEvents(input: BuildEventsInput): RaceEvent[] {
       if (delta < bestGain) { bestGain = delta; bestTeam = h.teamIdx; }
       if (delta > worstDrop) { worstDrop = delta; worstTeam = h.teamIdx; worstCamp = campLabelAt(h.campFrac); }
     }
-    const jitter = Math.round(s.endMs + Math.max(30_000, durationMs * 0.015) * (0.8 + rng() * 0.4));
+    // The ledger narrates that checkpoint's contents, so it must never be
+    // dated before the checkpoint itself is servable: both ride the same
+    // serving horizon, and an event saying "who gained" minutes ahead of the
+    // standings beat that carries it is a spoiler side channel.
+    const offset = Math.max(30_000, durationMs * 0.015) * (0.8 + rng() * 0.4);
+    const jitter = Math.round(
+      Math.max(s.endMs + offset, after.tMs + Math.max(10_000, durationMs * 0.004)),
+    );
     if (bestTeam >= 0 && bestGain <= -1 && jitter < core.pushStartMs) {
       const h = holders.find((x) => x.teamIdx === bestTeam)!;
       events.push({

@@ -72,20 +72,6 @@ export default function Home() {
           >
             {busy === 'everest' ? 'Preparing…' : '🏔 Everest demo'}
           </button>
-          <button
-            className="cta cta-ghost"
-            onClick={() => watchDemo('olympics')}
-            disabled={busy !== null}
-          >
-            {busy === 'olympics' ? 'Preparing…' : '🏅 Olympics demo'}
-          </button>
-          <button
-            className="cta cta-ghost"
-            onClick={() => watchDemo('space')}
-            disabled={busy !== null}
-          >
-            {busy === 'space' ? 'Preparing…' : '🚀 Mars demo'}
-          </button>
         </div>
       </div>
       <ul className="landing-points">

@@ -26,6 +26,12 @@ const STATUS_CHIP: Record<ClimberStatus, string> = {
   fallen: 'bad',
 };
 
+/** One glyph per coarse state, so the board reads at a glance. */
+const STATE_ICON: Record<string, string> = {
+  prep: '\u26fa', up: '\u25b2', down: '\u25bc', rest: '\u26fa',
+  hold: '\u23f8', storm: '\u2744', done: '\u2605', wiped: '\u2715',
+};
+
 interface Props {
   snap: JourneySnapshot;
   jt: JourneyTheme;
@@ -92,6 +98,9 @@ export function Standings({ snap, jt, teamNames, tMs, durationMs, selected, onSe
                 <span className="standing-main">
                   <span className="standing-name">{teamNames[teamIdx]}</span>
                   <span className="standing-where">
+                    <span className={`st-ico st-${st.motionKind}`} aria-hidden>
+                      {STATE_ICON[st.motionKind]}
+                    </span>
                     {where} · {st.activity}
                   </span>
                 </span>
@@ -152,14 +161,16 @@ function TeamCard({
   // squads from before dossiers existed — and other themes — keep the
   // original compact roster.
   const dossier = squad.length > 0 && squad[0].look !== undefined;
-  const [l1, l2, l3, l4, l5, l6, l7] = jt.meterLabels;
+  // Four bars, chosen because they move and mean something: oxygen and food
+  // are the supplies that run out, energy is the rest-cycle story, and
+  // acclimatization is WHY the squads keep descending. (Rope, med and morale
+  // still exist in the data — they feed the per-climber vitals — but seven
+  // near-static bars read as noise.)
+  const [l1, l2, , , l5, , l7] = jt.meterLabels;
   const bars: [string, number][] = [
     [l1, m.o2],
     [l2, m.food],
-    [l3, m.rope],
-    [l4, m.med],
     [l5, m.energy],
-    [l6, m.morale],
     [l7, m.accl],
   ];
   return (
