@@ -341,7 +341,7 @@ export function buildEvents(input: BuildEventsInput): RaceEvent[] {
       text: line('summit', {
         ...ctxFor(teamIdx),
         alt: 8849,
-        place: `${ordinal(place)} on the summit`,
+        place: ordinal(place),
       }),
     });
   }

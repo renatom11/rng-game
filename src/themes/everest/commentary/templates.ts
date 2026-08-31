@@ -62,8 +62,8 @@ export const TEMPLATES: Record<EventType, readonly string[]> = {
   summit: [
     '{team}. SUMMIT. {alt} metres. There is nothing above them but sky.',
     'THE TOP OF THE WORLD for {team} — {place} to stand on the summit!',
-    '{team} take the final steps together. Summit. {place}.',
-    'The radio crackles: "{team}... summit." {place} on top.',
+    '{team} take the final steps together. Summit — {place} on top.',
+    'The radio crackles: "{team}... summit." {place} to arrive.',
   ],
   race_finish: [
     'The mountain is quiet again. The order is written, and it will not change now.',

@@ -80,28 +80,35 @@ export function buildSquads(
   return { climbers, cast: { sirdar, epithet } };
 }
 
-/** Curated team palette: [hex, spoken name]. Distinct on a dark map. */
+/**
+ * Curated team palette: [hex, spoken name], in ASSIGNMENT ORDER.
+ * Validated (dataviz six checks) against the dark surface #111c30:
+ * lightness band, chroma floor, adjacent-pair CVD separation, normal-vision
+ * floor, and 3:1 contrast all pass (one adjacent pair sits in the 6–8 CVD
+ * band, which is legal because markers always carry team tags and standings
+ * rows/chart lines carry direct labels). Do not re-order casually.
+ */
 export const TEAM_PALETTE: [string, string][] = [
-  ['#ff5e5b', 'Crimson'],
-  ['#4fc1ff', 'Sky'],
-  ['#ffd166', 'Amber'],
-  ['#7ae582', 'Jade'],
-  ['#c792ea', 'Violet'],
-  ['#ff9f68', 'Ember'],
-  ['#64dfdf', 'Glacier'],
-  ['#f2789f', 'Rose'],
-  ['#b8f26d', 'Moss'],
-  ['#8ab6ff', 'Cobalt'],
-  ['#ffe08a', 'Gold'],
-  ['#9ef0e0', 'Mint'],
-  ['#e6a4ff', 'Orchid'],
-  ['#ffb3ab', 'Coral'],
-  ['#a2e8ff', 'Ice'],
-  ['#d4c05e', 'Ochre'],
-  ['#96e072', 'Fern'],
-  ['#f797e1', 'Magenta'],
-  ['#7fd4a8', 'Sage'],
-  ['#c9a7ff', 'Lilac'],
+  ['#3987e5', 'Cobalt'],
+  ['#d95926', 'Ember'],
+  ['#199e70', 'Jade'],
+  ['#c98500', 'Gold'],
+  ['#d55181', 'Rose'],
+  ['#008300', 'Forest'],
+  ['#9085e9', 'Violet'],
+  ['#e66767', 'Coral'],
+  ['#12a7a7', 'Lagoon'],
+  ['#9e497d', 'Mulberry'],
+  ['#909b3b', 'Moss'],
+  ['#5465b1', 'Indigo'],
+  ['#c77f3e', 'Amber'],
+  ['#118568', 'Pine'],
+  ['#b379c0', 'Orchid'],
+  ['#7b6c01', 'Bronze'],
+  ['#439ccc', 'Sky'],
+  ['#a8465d', 'Garnet'],
+  ['#5da56e', 'Sage'],
+  ['#725ca9', 'Iris'],
 ];
 
 export function assignColors(nTeams: number, given: (string | undefined)[]): {
