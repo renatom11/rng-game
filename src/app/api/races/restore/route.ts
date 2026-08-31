@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
-import { restoreRace, ValidationError } from '@/lib/races';
-import { RaceCodeError } from '@/lib/raceCode';
+import { HttpError, restoreRace } from '@/lib/raceApi';
 
 export const runtime = 'nodejs';
 
@@ -16,11 +15,13 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'paste a recovery code' }, { status: 400 });
   }
   try {
-    const { slug, existed } = await restoreRace(code, Date.now());
-    return NextResponse.json({ slug, url: `/r/${slug}`, existed });
+    // Rebuilds the race shell; if its timeline is missing the response says
+    // so and the restoring browser regenerates + uploads it.
+    const result = await restoreRace(code, Date.now());
+    return NextResponse.json(result);
   } catch (err) {
-    if (err instanceof RaceCodeError || err instanceof ValidationError) {
-      return NextResponse.json({ error: err.message }, { status: 400 });
+    if (err instanceof HttpError) {
+      return NextResponse.json({ error: err.message }, { status: err.status });
     }
     throw err;
   }

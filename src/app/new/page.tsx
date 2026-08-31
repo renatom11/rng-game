@@ -75,27 +75,13 @@ export default function NewRacePage() {
           : {}),
         demo,
       };
-      const res = await fetch('/api/races', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setErr(data.error ?? 'something went wrong');
-        setBusy(false);
-        return;
-      }
-      if (data.recoveryCode) {
-        try {
-          sessionStorage.setItem(`summit-code-${data.slug}`, data.recoveryCode);
-        } catch {
-          // storage unavailable — the race still works, just no banner
-        }
-      }
-      router.push(data.url);
-    } catch {
-      setErr('network error — try again');
+      // The server commits the seed; THIS browser generates the race and
+      // uploads it pre-sliced (the server never does heavy work).
+      const { createRaceFromBrowser } = await import('@/lib/clientGen');
+      const result = await createRaceFromBrowser(body);
+      router.push(result.url);
+    } catch (err) {
+      setErr(err instanceof Error ? err.message : 'something went wrong — try again');
       setBusy(false);
     }
   };

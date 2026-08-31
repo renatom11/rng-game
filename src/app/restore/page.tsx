@@ -10,10 +10,13 @@ export default function RestorePage() {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
+  const [stage, setStage] = useState<string | null>(null);
+
   const submit = async () => {
     setErr(null);
     setBusy(true);
     try {
+      setStage('Checking the code…');
       const res = await fetch('/api/races/restore', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -23,12 +26,27 @@ export default function RestorePage() {
       if (!res.ok) {
         setErr(data.error ?? 'something went wrong');
         setBusy(false);
+        setStage(null);
         return;
       }
+      if (!data.ready) {
+        // This browser regenerates the race from the committed seed and
+        // re-uploads it — byte-identical, resumed at the right moment.
+        setStage('Recharting the mountain…');
+        const { generateAndUpload } = await import('@/lib/clientGen');
+        await generateAndUpload(
+          data.slug,
+          data.seed,
+          data.theme,
+          data.teams,
+          data.durationMs,
+        );
+      }
       router.push(data.url);
-    } catch {
-      setErr('network error — try again');
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'network error — try again');
       setBusy(false);
+      setStage(null);
     }
   };
 
@@ -55,7 +73,7 @@ export default function RestorePage() {
       </label>
       {err && <p className="form-err">{err}</p>}
       <button className="cta" onClick={submit} disabled={busy || !code.trim()}>
-        {busy ? 'Rebuilding the mountain…' : 'Restore the race'}
+        {busy ? (stage ?? 'Rebuilding the mountain…') : 'Restore the race'}
       </button>
     </main>
   );

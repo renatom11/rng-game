@@ -61,16 +61,28 @@ Demo races opt out of spoiler-proofing and get playback controls
 (1×–600× speed and a scrubber) so you can watch an "8-hour" race in a minute.
 Finished races unlock the same controls as a replay.
 
-## Recovery codes
+## Recovery codes & the chunk protocol
 
 A race is a pure function of (seed, config, start time), so creation hands
-the host a one-line **recovery code** that IS the race. If the server,
-database, or hosting provider dies mid-race, pasting the code at `/restore`
-on any Summit instance rebuilds the race byte-identically — same teams,
-same story, same ending, same URL slug — picked up at exactly the right
-moment (position is just clock arithmetic against the embedded start time).
-The code contains the sealed ending, so it is shown once, only to the
-creator, and never served again.
+the host a one-line HMAC-signed **recovery code** that IS the race. If the
+server, database, or hosting provider dies mid-race, pasting the code at
+`/restore` on any instance sharing the signing secret rebuilds the race
+byte-identically — same teams, same story, same ending, same URL slug —
+picked up at exactly the right moment. The code contains the sealed ending,
+so it is shown once, only to the creator, and never served again.
+
+The serving side runs the **chunk protocol**, designed so the whole app
+fits Cloudflare Workers' free tier (~10ms CPU/request): the server draws
+and COMMITS the seed at creation, the creator's browser generates the
+entire timeline from it and uploads it pre-sliced into time-windowed delta
+chunks, and from then on the server only selects stored chunk strings by
+clock arithmetic — never generating, never parsing. The chunk grid contains
+an edge exactly at the final act's start, so the spoiler hard cap holds
+unchanged. Fairness is end-to-end checkable: the committed seed means no
+one can reroll for an ending they like, and once the race finishes the seed
+is revealed so ANY viewer's browser can regenerate the whole race and
+verify every served byte (the "Verify fairness" button on the results
+page).
 
 ## Running it
 
@@ -135,7 +147,7 @@ didn't already decide.
 
 ## Testing
 
-`npm test` runs 84 tests: byte-level determinism, chi-square uniformity,
+`npm test` runs 93 tests: byte-level determinism, chi-square uniformity,
 pairwise head-to-head balance, reachability cell coverage, convergence rank
 bounds through the finale, monotonicity/no-teleport guards, resource-range
 and continuity checks, wipeout placement constraints, event-density and

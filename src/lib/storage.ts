@@ -1,95 +1,113 @@
 /**
- * Storage seam: one tiny async interface, two drivers.
+ * Storage seam v2 for the chunk protocol: one tiny async interface, two
+ * drivers.
  *
- * - Node (dev, tests, self-hosted): the better-sqlite3 file database,
- *   loaded lazily so the native module is never touched on Workers.
- * - Cloudflare Workers: a D1 database bound as SUMMIT_DB. Timelines are
- *   gzipped into a BLOB there — a worst-case 50-team × 24h timeline is
- *   ~1.9MB of JSON, a whisker under D1's 2MB row cap, and ~250KB gzipped.
+ * - Node (dev, tests, self-hosted): better-sqlite3, loaded lazily so the
+ *   native module never reaches Workers.
+ * - Cloudflare Workers: D1 bound as SUMMIT_DB — where every operation is
+ *   row I/O and string passing, comfortably inside the free tier's CPU cap.
  *
- * Rows are immutable either way; race status is always derived from the
- * clock, so the storage contract is just get / exists / insert.
+ * A race is: one meta row (seed committed at init, ready=0), then the
+ * creator-uploaded chunk rows + finals row (ready=1). Rows are immutable;
+ * status is always derived from the clock.
  */
 
-export interface RaceRow {
+export interface RaceMetaRow {
   id: string;
   theme: string;
   seed: string;
   config_json: string;
-  timeline_json: string;
   created_at: number;
   start_at: number;
   duration_ms: number;
+  ready: number;
+}
+
+export interface StoredChunk {
+  idx: number;
+  body: string;
 }
 
 export interface RaceStorage {
-  get(id: string): Promise<RaceRow | null>;
-  exists(id: string): Promise<boolean>;
-  insert(row: RaceRow): Promise<void>;
-}
-
-/* ---------------- gzip helpers (Web Streams — Workers + Node 18+) -------- */
-
-async function gzip(text: string): Promise<Uint8Array> {
-  const stream = new Blob([text]).stream().pipeThrough(new CompressionStream('gzip'));
-  return new Uint8Array(await new Response(stream).arrayBuffer());
-}
-
-async function gunzip(bytes: ArrayBuffer | Uint8Array): Promise<string> {
-  const buf = bytes instanceof Uint8Array ? new Uint8Array(bytes) : new Uint8Array(bytes);
-  const stream = new Blob([buf]).stream().pipeThrough(new DecompressionStream('gzip'));
-  return await new Response(stream).text();
+  getMeta(id: string): Promise<RaceMetaRow | null>;
+  insertMeta(row: RaceMetaRow): Promise<void>;
+  /** Store all chunks + finals and flip ready — the upload commit. */
+  putTimeline(
+    id: string,
+    chunks: { idx: number; fromMs: number; toMs: number; body: string }[],
+    finalsBody: string,
+  ): Promise<void>;
+  /** Chunk bodies with idx > afterIdx and window end <= maxToMs (null = all). */
+  getChunks(id: string, afterIdx: number, maxToMs: number | null): Promise<StoredChunk[]>;
+  getFinals(id: string): Promise<string | null>;
 }
 
 /* ---------------- D1 driver --------------------------------------------- */
 
+interface D1Stmt {
+  bind(...args: unknown[]): D1Stmt;
+  first<T>(): Promise<T | null>;
+  run(): Promise<unknown>;
+  all<T>(): Promise<{ results: T[] }>;
+}
+
 interface D1Like {
-  prepare(sql: string): {
-    bind(...args: unknown[]): {
-      first<T>(): Promise<T | null>;
-      run(): Promise<unknown>;
-    };
-  };
+  prepare(sql: string): D1Stmt;
+  batch(stmts: D1Stmt[]): Promise<unknown>;
 }
 
 function d1Storage(db: D1Like): RaceStorage {
   return {
-    async get(id) {
-      const row = await db
-        .prepare(
-          'SELECT id, theme, seed, config_json, timeline_gz, created_at, start_at, duration_ms FROM races WHERE id = ?',
-        )
-        .bind(id)
-        .first<Omit<RaceRow, 'timeline_json'> & { timeline_gz: ArrayBuffer }>();
-      if (!row) return null;
-      const { timeline_gz, ...rest } = row;
-      return { ...rest, timeline_json: await gunzip(timeline_gz) };
+    async getMeta(id) {
+      return db.prepare('SELECT * FROM race_meta WHERE id = ?').bind(id).first<RaceMetaRow>();
     },
-    async exists(id) {
-      const row = await db
-        .prepare('SELECT id FROM races WHERE id = ?')
-        .bind(id)
-        .first<{ id: string }>();
-      return row !== null;
-    },
-    async insert(row) {
-      const gz = await gzip(row.timeline_json);
+    async insertMeta(r) {
       await db
         .prepare(
-          `INSERT INTO races (id, theme, seed, config_json, timeline_gz, created_at, start_at, duration_ms)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO race_meta (id, theme, seed, config_json, created_at, start_at, duration_ms, ready)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 0)`,
         )
-        .bind(
-          row.id,
-          row.theme,
-          row.seed,
-          row.config_json,
-          gz.buffer.slice(gz.byteOffset, gz.byteOffset + gz.byteLength),
-          row.created_at,
-          row.start_at,
-          row.duration_ms,
-        )
+        .bind(r.id, r.theme, r.seed, r.config_json, r.created_at, r.start_at, r.duration_ms)
         .run();
+    },
+    async putTimeline(id, chunks, finalsBody) {
+      const insert = db.prepare(
+        'INSERT INTO race_chunks (race_id, idx, from_ms, to_ms, body) VALUES (?, ?, ?, ?, ?)',
+      );
+      const BATCH = 80;
+      for (let i = 0; i < chunks.length; i += BATCH) {
+        await db.batch(
+          chunks
+            .slice(i, i + BATCH)
+            .map((c) => insert.bind(id, c.idx, c.fromMs, c.toMs, c.body)),
+        );
+      }
+      await db.batch([
+        db.prepare('INSERT INTO race_finals (race_id, body) VALUES (?, ?)').bind(id, finalsBody),
+        db.prepare('UPDATE race_meta SET ready = 1 WHERE id = ?').bind(id),
+      ]);
+    },
+    async getChunks(id, afterIdx, maxToMs) {
+      const stmt =
+        maxToMs === null
+          ? db
+              .prepare(
+                'SELECT idx, body FROM race_chunks WHERE race_id = ? AND idx > ? ORDER BY idx',
+              )
+              .bind(id, afterIdx)
+          : db
+              .prepare(
+                'SELECT idx, body FROM race_chunks WHERE race_id = ? AND idx > ? AND to_ms <= ? ORDER BY idx',
+              )
+              .bind(id, afterIdx, maxToMs);
+      return (await stmt.all<StoredChunk>()).results;
+    },
+    async getFinals(id) {
+      const row = await db
+        .prepare('SELECT body FROM race_finals WHERE race_id = ?')
+        .bind(id)
+        .first<{ body: string }>();
+      return row?.body ?? null;
     },
   };
 }
@@ -100,34 +118,52 @@ let nodeStorage: RaceStorage | null = null;
 
 async function getNodeStorage(): Promise<RaceStorage> {
   if (nodeStorage) return nodeStorage;
-  // Lazy dynamic import: the native module must never be resolved on Workers.
   const { getDb } = await import('./db');
   nodeStorage = {
-    async get(id) {
-      const row = getDb().prepare('SELECT * FROM races WHERE id = ?').get(id) as
-        | RaceRow
-        | undefined;
-      return row ?? null;
+    async getMeta(id) {
+      return (
+        (getDb().prepare('SELECT * FROM race_meta WHERE id = ?').get(id) as
+          | RaceMetaRow
+          | undefined) ?? null
+      );
     },
-    async exists(id) {
-      return getDb().prepare('SELECT id FROM races WHERE id = ?').get(id) !== undefined;
-    },
-    async insert(row) {
+    async insertMeta(r) {
       getDb()
         .prepare(
-          `INSERT INTO races (id, theme, seed, config_json, timeline_json, created_at, start_at, duration_ms)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO race_meta (id, theme, seed, config_json, created_at, start_at, duration_ms, ready)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 0)`,
         )
-        .run(
-          row.id,
-          row.theme,
-          row.seed,
-          row.config_json,
-          row.timeline_json,
-          row.created_at,
-          row.start_at,
-          row.duration_ms,
+        .run(r.id, r.theme, r.seed, r.config_json, r.created_at, r.start_at, r.duration_ms);
+    },
+    async putTimeline(id, chunks, finalsBody) {
+      const db = getDb();
+      const tx = db.transaction(() => {
+        const insert = db.prepare(
+          'INSERT INTO race_chunks (race_id, idx, from_ms, to_ms, body) VALUES (?, ?, ?, ?, ?)',
         );
+        for (const c of chunks) insert.run(id, c.idx, c.fromMs, c.toMs, c.body);
+        db.prepare('INSERT INTO race_finals (race_id, body) VALUES (?, ?)').run(id, finalsBody);
+        db.prepare('UPDATE race_meta SET ready = 1 WHERE id = ?').run(id);
+      });
+      tx();
+    },
+    async getChunks(id, afterIdx, maxToMs) {
+      const db = getDb();
+      return maxToMs === null
+        ? (db
+            .prepare('SELECT idx, body FROM race_chunks WHERE race_id = ? AND idx > ? ORDER BY idx')
+            .all(id, afterIdx) as StoredChunk[])
+        : (db
+            .prepare(
+              'SELECT idx, body FROM race_chunks WHERE race_id = ? AND idx > ? AND to_ms <= ? ORDER BY idx',
+            )
+            .all(id, afterIdx, maxToMs) as StoredChunk[]);
+    },
+    async getFinals(id) {
+      const row = getDb().prepare('SELECT body FROM race_finals WHERE race_id = ?').get(id) as
+        | { body: string }
+        | undefined;
+      return row?.body ?? null;
     },
   };
   return nodeStorage;

@@ -1,26 +1,23 @@
-import crypto from 'node:crypto';
 import type { Style } from '@/themes/everest/types';
 import type { Theme } from './races';
 
 /**
- * Recovery codes: one string that IS the race.
+ * Recovery codes v2: one signed string that IS the race.
  *
- * A race is a pure function of (seed, config, start time) — the whole
- * timeline regenerates from these bytes deterministically, and "where the
- * race is now" is just the clock measured against startAtMs. So the code
- * makes hosting risk-free: if the server, database, or hosting provider
- * evaporates mid-race, pasting the code into any Summit instance rebuilds
- * the race exactly, at the exact right moment, under the same URL slug
- * (so already-shared links keep working on the same domain).
+ * A race is a pure function of (seed, config, start time), so the code
+ * rebuilds it anywhere — same outcome, same story, same slug/links —
+ * resumed at exactly the right clock position. v2 adds an HMAC signature
+ * under the server's secret: the seed inside every accepted code was drawn
+ * and committed by the server at creation, so a host cannot forge a code
+ * around a hand-picked ("shopped") seed. Restore rejects unsigned or
+ * tampered codes.
  *
- * The flip side, stated honestly: the seed determines the ending, so
- * anyone holding the code could, with effort, compute the result early.
- * The code is the host's sealed envelope — save it, don't open it. It is
- * shown once, at creation, and never served again.
+ * Isomorphic on purpose (WebCrypto only): runs on Workers, Node 18+, and
+ * in browsers.
  */
 
 export interface RaceCodePayload {
-  v: 1;
+  v: 2;
   slug: string;
   seed: string;
   theme: Theme;
@@ -32,36 +29,76 @@ export interface RaceCodePayload {
   createdAt: number;
 }
 
-const PREFIX = 'SMT1';
-
-function checksum(body: string): string {
-  return crypto.createHash('sha256').update(body).digest('hex').slice(0, 8);
-}
-
-export function encodeRaceCode(payload: RaceCodePayload): string {
-  const body = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
-  return `${PREFIX}.${body}.${checksum(body)}`;
-}
+const PREFIX = 'SMT2';
 
 export class RaceCodeError extends Error {}
 
-export function decodeRaceCode(code: string): RaceCodePayload {
-  const trimmed = code.trim();
-  const parts = trimmed.split('.');
+const enc = new TextEncoder();
+
+function b64url(bytes: Uint8Array): string {
+  let bin = '';
+  for (const b of bytes) bin += String.fromCharCode(b);
+  const b64 =
+    typeof btoa === 'function'
+      ? btoa(bin)
+      : Buffer.from(bytes).toString('base64');
+  return b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+function b64urlDecode(s: string): Uint8Array {
+  const b64 = s.replace(/-/g, '+').replace(/_/g, '/');
+  const pad = b64 + '='.repeat((4 - (b64.length % 4)) % 4);
+  const bin =
+    typeof atob === 'function'
+      ? atob(pad)
+      : Buffer.from(pad, 'base64').toString('binary');
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+async function hmac(secret: string, body: string): Promise<string> {
+  const key = await crypto.subtle.importKey(
+    'raw',
+    enc.encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  );
+  const sig = await crypto.subtle.sign('HMAC', key, enc.encode(body));
+  return b64url(new Uint8Array(sig));
+}
+
+export async function encodeRaceCode(
+  payload: RaceCodePayload,
+  secret: string,
+): Promise<string> {
+  const body = b64url(enc.encode(JSON.stringify(payload)));
+  return `${PREFIX}.${body}.${await hmac(secret, body)}`;
+}
+
+export async function decodeRaceCode(
+  code: string,
+  secret: string,
+): Promise<RaceCodePayload> {
+  const parts = code.trim().split('.');
   if (parts.length !== 3 || parts[0] !== PREFIX) {
     throw new RaceCodeError('that does not look like a Summit recovery code');
   }
-  const [, body, sum] = parts;
-  if (checksum(body) !== sum) {
-    throw new RaceCodeError('the code is damaged (checksum mismatch) — check for missing characters');
+  const [, body, sig] = parts;
+  const expected = await hmac(secret, body);
+  if (sig !== expected) {
+    throw new RaceCodeError(
+      'the code is not valid for this server (damaged, tampered, or from elsewhere)',
+    );
   }
   let payload: RaceCodePayload;
   try {
-    payload = JSON.parse(Buffer.from(body, 'base64url').toString('utf8'));
+    payload = JSON.parse(new TextDecoder().decode(b64urlDecode(body)));
   } catch {
     throw new RaceCodeError('the code is damaged (unreadable payload)');
   }
-  if (payload.v !== 1) throw new RaceCodeError('this code is from a newer version of Summit');
+  if (payload.v !== 2) throw new RaceCodeError('this code is from another Summit version');
   if (!/^[0-9a-f]{32}$/.test(payload.seed ?? '')) {
     throw new RaceCodeError('the code is damaged (bad seed)');
   }

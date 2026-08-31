@@ -3,73 +3,95 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 process.env.SUMMIT_DB_PATH = ':memory:';
 
 import { resetDbForTests } from '@/lib/db';
-import { createRace, getRaceView, restoreRace } from '@/lib/races';
+import { resetStorageForTests } from '@/lib/storage';
+import { acceptUpload, buildEnvelope, initRace, restoreRace } from '@/lib/raceApi';
+import { buildUploadBody } from '@/lib/clientGen';
 import { decodeRaceCode, encodeRaceCode, RaceCodeError } from '@/lib/raceCode';
 import { heightOrderAt, displayPosAt } from '@/lib/client/raceState';
 import { generateEverest } from '@/themes/everest/generate';
 import { toJourneySnapshot } from '@/lib/slice';
 
 const NOW = 1_700_000_000_000;
+const SECRET = 'summit-dev-secret'; // matches the raceApi fallback
 
 function teams(n: number) {
   return Array.from({ length: n }, (_, i) => ({ name: `Team ${i + 1}` }));
 }
 
-beforeAll(() => resetDbForTests());
-afterAll(() => resetDbForTests());
+function reset() {
+  resetDbForTests();
+  resetStorageForTests();
+}
 
-describe('recovery codes', () => {
-  it('round-trips and rejects tampering', async () => {
-    const payload = {
-      v: 1 as const,
-      slug: 'abc123def4',
-      seed: 'deadbeefdeadbeefdeadbeefdeadbeef',
-      theme: 'everest' as const,
-      title: 'T',
-      teams: teams(4),
-      durationMs: 600_000,
-      startAtMs: NOW,
-      demo: false,
-      createdAt: NOW,
-    };
-    const code = encodeRaceCode(payload);
-    expect(decodeRaceCode(code)).toEqual(payload);
-    expect(decodeRaceCode(`  ${code}\n`)).toEqual(payload); // whitespace-tolerant
-    expect(() => decodeRaceCode(code.slice(0, -1) + 'X')).toThrow(RaceCodeError);
-    expect(() => decodeRaceCode('SMT1.garbage.12345678')).toThrow(RaceCodeError);
-    expect(() => decodeRaceCode('hello')).toThrow(RaceCodeError);
+beforeAll(reset);
+afterAll(reset);
+
+describe('signed recovery codes', () => {
+  const payload = {
+    v: 2 as const,
+    slug: 'abc123def4',
+    seed: 'deadbeefdeadbeefdeadbeefdeadbeef',
+    theme: 'everest' as const,
+    title: 'T',
+    teams: teams(4),
+    durationMs: 600_000,
+    startAtMs: NOW,
+    demo: false,
+    createdAt: NOW,
+  };
+
+  it('round-trips, rejects tampering, and rejects foreign secrets', async () => {
+    const code = await encodeRaceCode(payload, SECRET);
+    expect(await decodeRaceCode(code, SECRET)).toEqual(payload);
+    expect(await decodeRaceCode(`  ${code}\n`, SECRET)).toEqual(payload);
+    await expect(decodeRaceCode(code.slice(0, -2) + 'XX', SECRET)).rejects.toThrow(RaceCodeError);
+    await expect(decodeRaceCode('SMT2.garbage.sig', SECRET)).rejects.toThrow(RaceCodeError);
+    await expect(decodeRaceCode('hello', SECRET)).rejects.toThrow(RaceCodeError);
+    // A code signed under another secret (i.e. a forged/shopped seed) fails.
+    const forged = await encodeRaceCode({ ...payload, seed: '11111111111111111111111111111111' }, 'attacker');
+    await expect(decodeRaceCode(forged, SECRET)).rejects.toThrow(RaceCodeError);
   });
 
   it('restores a crashed race byte-identically, same slug, mid-flight', async () => {
-    const { slug, recoveryCode } = await createRace(
+    const init = await initRace(
       { teams: teams(6), durationMs: 3_600_000, startAtMs: NOW + 60_000, title: 'Crash Test' },
       NOW,
     );
+    const { body } = await buildUploadBody('everest', init.seed, teams(6), 3_600_000);
+    await acceptUpload(init.slug, init.seed, body);
     const midRace = NOW + 60_000 + 1_200_000;
-    const before = await getRaceView(slug, midRace);
+    const before = await buildEnvelope(init.slug, midRace, -1);
     expect(before).not.toBeNull();
 
     // The server burns down.
-    resetDbForTests();
-    expect(await getRaceView(slug, midRace)).toBeNull();
+    reset();
+    expect(await buildEnvelope(init.slug, midRace, -1)).toBeNull();
 
-    // The host pastes the code — restore is exact and lands mid-race.
-    const restored = await restoreRace(recoveryCode, midRace);
-    expect(restored.slug).toBe(slug);
+    // The host pastes the signed code; the shell comes back, then the
+    // restoring browser regenerates from the SAME committed seed and
+    // re-uploads. The served bytes end up identical.
+    const restored = await restoreRace(init.recoveryCode, midRace);
+    expect(restored.slug).toBe(init.slug);
     expect(restored.existed).toBe(false);
-    const after = await getRaceView(slug, midRace);
-    expect(after).not.toBeNull();
-    expect(after!.startAt).toBe(before!.startAt);
-    expect(after!.status).toBe('running');
-    expect(JSON.stringify(after!.snapshot)).toBe(JSON.stringify(before!.snapshot));
+    expect(restored.ready).toBe(false);
+    expect(restored.seed).toBe(init.seed);
+    const again = await buildUploadBody(
+      'everest',
+      restored.seed,
+      restored.teams,
+      restored.durationMs,
+    );
+    await acceptUpload(restored.slug, restored.seed, again.body);
+    const after = await buildEnvelope(init.slug, midRace, -1);
+    expect(after).toBe(before);
 
-    // Restoring again is a no-op.
-    expect((await restoreRace(recoveryCode, midRace)).existed).toBe(true);
+    // Restoring an existing race is a no-op.
+    expect((await restoreRace(init.recoveryCode, midRace)).existed).toBe(true);
   });
 });
 
 describe('live height order', () => {
-  it('pre-push: sorted by display position; wiped teams sink', async () => {
+  it('pre-push: sorted by display position; wiped teams sink', () => {
     const t = generateEverest('height-1', { teams: teams(8), durationMs: 1_800_000 });
     const snap = toJourneySnapshot('everest', t, 1_800_000, { complete: true });
     const at = 0.5 * 1_800_000;
@@ -80,7 +102,6 @@ describe('live height order', () => {
         displayPosAt(snap, order[i], at) - 1e-9,
       );
     }
-    // After a wipe, wiped teams occupy the bottom of the order.
     for (const w of t.wipeouts) {
       const o = heightOrderAt(snap, 8, w.tMs + 1);
       const wipedByThen = t.wipeouts

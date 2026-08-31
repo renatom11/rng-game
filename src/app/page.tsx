@@ -26,30 +26,25 @@ export default function Home() {
   const watchDemo = async (theme: 'everest' | 'olympics' | 'space') => {
     setBusy(theme);
     try {
-      const res = await fetch('/api/races', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          theme,
-          title:
-            theme === 'olympics'
-              ? 'Demo Games'
-              : theme === 'space'
-                ? 'Demo Mars Run'
-                : 'Demo Expedition',
-          teams: (theme === 'olympics'
-            ? DEMO_OLYMPICS
+      const { createRaceFromBrowser } = await import('@/lib/clientGen');
+      const result = await createRaceFromBrowser({
+        theme,
+        title:
+          theme === 'olympics'
+            ? 'Demo Games'
             : theme === 'space'
-              ? DEMO_SPACE
-              : DEMO_EVEREST
-          ).map((name) => ({ name })),
-          durationMs: 600_000,
-          demo: true,
-        }),
+              ? 'Demo Mars Run'
+              : 'Demo Expedition',
+        teams: (theme === 'olympics'
+          ? DEMO_OLYMPICS
+          : theme === 'space'
+            ? DEMO_SPACE
+            : DEMO_EVEREST
+        ).map((name) => ({ name })),
+        durationMs: 600_000,
+        demo: true,
       });
-      const data = await res.json();
-      if (res.ok) router.push(data.url);
-      else setBusy(null);
+      router.push(result.url);
     } catch {
       setBusy(null);
     }

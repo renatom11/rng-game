@@ -3,13 +3,12 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 process.env.SUMMIT_DB_PATH = ':memory:';
 
 import { resetDbForTests } from '@/lib/db';
-import {
-  createRace,
-  getRaceView,
-  validateCreateInput,
-  ValidationError,
-} from '@/lib/races';
-import { horizonFor, preLookaheadMs, pushLookaheadMs } from '@/lib/slice';
+import { resetStorageForTests } from '@/lib/storage';
+import { validateCreateInput, ValidationError, type Theme } from '@/lib/races';
+import { acceptUpload, buildEnvelope, initRace } from '@/lib/raceApi';
+import { buildUploadBody } from '@/lib/clientGen';
+import { boundariesFor, pushStartFor } from '@/lib/chunking';
+import { horizonFor } from '@/lib/slice';
 
 const NOW = 1_700_000_000_000;
 
@@ -17,11 +16,59 @@ function teams(n: number) {
   return Array.from({ length: n }, (_, i) => ({ name: `Team ${i + 1}` }));
 }
 
-beforeAll(() => resetDbForTests());
-afterAll(() => resetDbForTests());
+function reset() {
+  resetDbForTests();
+  resetStorageForTests();
+}
 
-describe('race storage & spoiler-proof serving', () => {
-  it('validates input', async () => {
+beforeAll(reset);
+afterAll(reset);
+
+interface Envelope {
+  status: string;
+  cursor: number;
+  complete: boolean;
+  chunks: { sinceMs: number; horizonMs: number }[];
+  finals: unknown;
+  seed: string | null;
+  startAt: number;
+  durationMs: number;
+  config: { title: string; teams: unknown[] };
+}
+
+async function envelope(slug: string, nowMs: number, cursor = -1) {
+  const body = await buildEnvelope(slug, nowMs, cursor);
+  expect(body).not.toBeNull();
+  return { raw: body!, data: JSON.parse(body!) as Envelope };
+}
+
+async function createFull(opts: {
+  theme?: Theme;
+  n?: number;
+  durationMs?: number;
+  startAtMs?: number;
+  demo?: boolean;
+}) {
+  const theme = opts.theme ?? 'everest';
+  const n = opts.n ?? 6;
+  const durationMs = opts.durationMs ?? 600_000;
+  const init = await initRace(
+    {
+      theme,
+      teams: teams(n),
+      durationMs,
+      ...(opts.startAtMs !== undefined ? { startAtMs: opts.startAtMs } : {}),
+      demo: opts.demo ?? false,
+    },
+    NOW,
+  );
+  const { body } = await buildUploadBody(theme, init.seed, teams(n), durationMs);
+  await acceptUpload(init.slug, init.seed, body);
+  return { ...init, durationMs, theme, n };
+}
+
+describe('race API under the chunk protocol', () => {
+  it('validates input', () => {
     expect(() => validateCreateInput({ teams: teams(1), durationMs: 60_000 }, NOW)).toThrow(ValidationError);
     expect(() => validateCreateInput({ teams: teams(51), durationMs: 60_000 }, NOW)).toThrow(ValidationError);
     expect(() => validateCreateInput({ teams: teams(4), durationMs: 30_000 }, NOW)).toThrow(ValidationError);
@@ -36,173 +83,100 @@ describe('race storage & spoiler-proof serving', () => {
     expect(ok.startAtMs).toBe(NOW + 60_000);
   });
 
-  it('scheduled races serve nothing but static config', async () => {
-    const { slug } = await createRace(
-      { teams: teams(6), durationMs: 600_000, title: 'Draft Night' },
+  it('a race without its upload is "preparing" and serves nothing', async () => {
+    const init = await initRace(
+      { teams: teams(4), durationMs: 300_000 },
       NOW,
     );
-    const view = (await getRaceView(slug, NOW + 1_000))!;
-    expect(view.status).toBe('scheduled');
-    expect(view.config.teams).toHaveLength(6);
-    expect(view.snapshot.complete).toBe(false);
-    expect(view.snapshot.horizonMs).toBe(-1);
-    expect(view.snapshot.events).toHaveLength(0);
-    if (view.snapshot.theme !== 'everest') throw new Error('expected everest');
-    expect(view.snapshot.grid.tMs).toHaveLength(0);
-    expect(view.snapshot.checkpoints).toHaveLength(0);
-    expect(view.snapshot.wipeouts).toHaveLength(0);
+    const { data } = await envelope(init.slug, NOW + 90_000);
+    expect(data.status).toBe('preparing');
+    expect(data.chunks).toHaveLength(0);
+    expect(data.finals).toBeNull();
+    expect(data.seed).toBeNull();
   });
 
-  it('mid-race truncation never leaks the future or the outcome', async () => {
-    const { slug } = await createRace(
-      { teams: teams(8), durationMs: 600_000, startAtMs: NOW },
-      NOW,
-    );
-    const midNow = NOW + 300_000; // halfway
-    const view = (await getRaceView(slug, midNow))!;
-    expect(view.status).toBe('running');
-    const snap = view.snapshot;
-    if (snap.theme !== 'everest') throw new Error('expected everest snapshot');
-    const horizon = snap.horizonMs;
-    expect(horizon).toBe(300_000 + preLookaheadMs(600_000));
-
-    expect(snap.finalOrder).toBeUndefined();
-    expect(snap.finalRank).toBeUndefined();
-    expect(snap.summitTimesMs).toBeUndefined();
-    for (const e of snap.events) expect(e.tMs).toBeLessThanOrEqual(horizon);
-    for (const c of snap.checkpoints) expect(c.tMs).toBeLessThanOrEqual(horizon);
-    for (const w of snap.wipeouts) expect(w.tMs).toBeLessThanOrEqual(horizon);
-    for (const t of snap.grid.tMs) expect(t).toBeLessThanOrEqual(horizon);
-    for (const t of snap.displayTrack.tMs) expect(t).toBeLessThanOrEqual(horizon);
-    for (const t of snap.meters.tMs) expect(t).toBeLessThanOrEqual(horizon);
-    expect(snap.grid.p[0].length).toBe(snap.grid.tMs.length);
-    expect(snap.displayTrack.pos[0].length).toBe(snap.displayTrack.tMs.length);
-
-    // Deep scan: the serialized payload must not contain outcome keys.
-    const json = JSON.stringify(view);
-    expect(json).not.toContain('"finalOrder"');
-    expect(json).not.toContain('"finalRank"');
-    expect(json).not.toContain('"summitTimesMs"');
+  it('scheduled races serve config only — zero chunks before the gun', async () => {
+    const race = await createFull({ startAtMs: NOW + 120_000 });
+    const { raw, data } = await envelope(race.slug, NOW + 30_000);
+    expect(data.status).toBe('scheduled');
+    expect(data.chunks).toHaveLength(0);
+    expect(data.finals).toBeNull();
+    expect(raw).not.toContain('"finalOrder"');
+    expect(data.config.teams).toHaveLength(6);
   });
 
-  it('pre-push horizons are hard-capped at the push start (no convergence data early)', async () => {
-    const duration = 600_000;
-    const { slug } = await createRace(
-      { teams: teams(6), durationMs: duration, startAtMs: NOW },
-      NOW,
-    );
-    const view0 = (await getRaceView(slug, NOW))!;
-    const pushStart = view0.snapshot.pushStartMs;
-    for (const elapsed of [0, 100_000, pushStart - 10_000, pushStart - 1]) {
-      const v = (await getRaceView(slug, NOW + elapsed))!;
-      expect(v.snapshot.horizonMs).toBeLessThanOrEqual(pushStart);
-      if (v.snapshot.theme !== 'everest') throw new Error('expected everest');
-      expect(v.snapshot.wipeouts).toHaveLength(0); // wipes are all post-push
+  it('mid-race, every served chunk respects the phased horizon and nothing leaks', async () => {
+    const race = await createFull({ startAtMs: NOW + 60_000, durationMs: 600_000 });
+    const start = NOW + 60_000;
+    for (const elapsed of [30_000, 250_000, 540_000, 585_000]) {
+      const { raw, data } = await envelope(race.slug, start + elapsed);
+      const horizon = horizonFor(elapsed, race.durationMs, pushStartFor(race.durationMs));
+      for (const c of data.chunks) {
+        expect(c.horizonMs).toBeLessThanOrEqual(horizon);
+        if (elapsed < pushStartFor(race.durationMs)) {
+          expect(c.horizonMs).toBeLessThanOrEqual(pushStartFor(race.durationMs));
+        }
+      }
+      expect(data.complete).toBe(false);
+      expect(data.finals).toBeNull();
+      expect(data.seed).toBeNull();
+      expect(raw).not.toContain('"finalOrder"');
+      expect(raw).not.toContain('"summitTimesMs"');
     }
   });
 
-  it('a minimum-duration race no longer serves its whole timeline at t=0', async () => {
-    const { slug } = await createRace(
-      { teams: teams(6), durationMs: 60_000, startAtMs: NOW },
-      NOW,
+  it('the cursor pages chunks forward without overlap', async () => {
+    const race = await createFull({ startAtMs: NOW + 60_000 });
+    const start = NOW + 60_000;
+    const first = await envelope(race.slug, start + 200_000);
+    expect(first.data.chunks.length).toBeGreaterThan(0);
+    const again = await envelope(race.slug, start + 200_000, first.data.cursor);
+    expect(again.data.chunks).toHaveLength(0);
+    const later = await envelope(race.slug, start + 400_000, first.data.cursor);
+    expect(later.data.chunks.length).toBeGreaterThan(0);
+    expect(later.data.chunks[0].sinceMs).toBe(
+      first.data.chunks[first.data.chunks.length - 1].horizonMs,
     );
-    const v = (await getRaceView(slug, NOW + 100))!;
-    expect(v.status).toBe('running');
-    const snap = v.snapshot;
-    if (snap.theme !== 'everest') throw new Error('expected everest');
-    // Horizon covers only a few seconds — not the race.
-    expect(snap.horizonMs).toBeLessThanOrEqual(preLookaheadMs(60_000) + 100);
-    const lastGrid = snap.grid.tMs[snap.grid.tMs.length - 1] ?? 0;
-    expect(lastGrid).toBeLessThan(snap.pushStartMs);
-    // No team's served curve is anywhere near finished.
-    for (const row of snap.grid.p) {
-      for (const p of row) expect(p).toBeLessThan(0.9);
-    }
   });
 
-  it('push-phase lookahead is a few seconds, not the finale', async () => {
-    const duration = 600_000;
-    const { slug } = await createRace(
-      { teams: teams(6), durationMs: duration, startAtMs: NOW },
-      NOW,
-    );
-    const pushStart = (await getRaceView(slug, NOW))!.snapshot.pushStartMs;
-    const elapsed = pushStart + 5_000;
-    const v = (await getRaceView(slug, NOW + elapsed))!;
-    expect(v.snapshot.horizonMs).toBe(
-      Math.min(duration, elapsed + pushLookaheadMs(duration)),
-    );
-    expect(horizonFor(elapsed, duration, pushStart)).toBe(v.snapshot.horizonMs);
+  it('finished races serve everything: all chunks, finals, and the seed for verification', async () => {
+    const race = await createFull({ startAtMs: NOW + 60_000, durationMs: 600_000 });
+    const { data } = await envelope(race.slug, NOW + 60_000 + 600_001);
+    expect(data.status).toBe('finished');
+    expect(data.complete).toBe(true);
+    expect(data.chunks).toHaveLength(boundariesFor(race.durationMs).length);
+    expect(data.finals).not.toBeNull();
+    expect(data.seed).toBe(race.seed);
   });
 
-  it('olympics: marquee result keyframes never ship early', async () => {
-    const duration = 300_000;
-    const { slug } = await createRace(
-      {
-        teams: teams(6),
-        durationMs: duration,
-        startAtMs: NOW,
-        theme: 'olympics',
-      },
-      NOW,
-    );
-    // Pre-push: no marquee keyframes at all (they all end after pushStart).
-    const pre = (await getRaceView(slug, NOW + 200_000))!;
-    if (pre.snapshot.theme !== 'olympics') throw new Error('expected olympics');
-    expect(pre.snapshot.horizonMs).toBeLessThanOrEqual(pre.snapshot.pushStartMs);
-    // At 90% elapsed the closing keyframe (99.5%) is still unserved.
-    const late = (await getRaceView(slug, NOW + duration * 0.9))!;
-    if (late.snapshot.theme !== 'olympics') throw new Error('expected olympics');
-    const maxServed = Math.max(
-      0,
-      ...late.snapshot.pointsKeyframes.map((f) => f.tMs),
-    );
-    expect(maxServed).toBeLessThan(duration * 0.995);
-    expect(JSON.stringify(late)).not.toContain('"finalOrder"');
+  it('demo races are complete immediately', async () => {
+    const race = await createFull({ demo: true });
+    const { data } = await envelope(race.slug, NOW + 1_000);
+    expect(data.complete).toBe(true);
+    expect(data.finals).not.toBeNull();
   });
 
-  it('finished races disclose everything', async () => {
-    const { slug } = await createRace(
-      { teams: teams(5), durationMs: 600_000, startAtMs: NOW },
-      NOW,
+  it('upload is guarded: wrong seed, double upload, and forged windows all rejected', async () => {
+    const init = await initRace({ teams: teams(4), durationMs: 300_000 }, NOW);
+    const { body } = await buildUploadBody('everest', init.seed, teams(4), 300_000);
+    await expect(acceptUpload(init.slug, 'not-the-seed', body)).rejects.toThrow(/seed/);
+    await acceptUpload(init.slug, init.seed, body);
+    await expect(acceptUpload(init.slug, init.seed, body)).rejects.toThrow(/already/);
+
+    const init2 = await initRace({ teams: teams(4), durationMs: 300_000 }, NOW);
+    const wrong = await buildUploadBody('everest', init2.seed, teams(4), 600_000);
+    await expect(acceptUpload(init2.slug, init2.seed, wrong.body)).rejects.toThrow(
+      /chunk|window/,
     );
-    const view = (await getRaceView(slug, NOW + 600_001))!;
-    expect(view.status).toBe('finished');
-    expect(view.snapshot.complete).toBe(true);
-    expect(view.snapshot.finalOrder).toHaveLength(5);
-    if (view.snapshot.theme !== 'everest') throw new Error('expected everest');
-    expect(view.snapshot.summitTimesMs).toHaveLength(5);
-    const lastEvent = view.snapshot.events[view.snapshot.events.length - 1];
-    expect(lastEvent.type).toBe('race_finish');
   });
 
-  it('demo races are fully disclosed from the start', async () => {
-    const { slug } = await createRace(
-      { teams: teams(4), durationMs: 600_000, demo: true },
-      NOW,
-    );
-    const view = (await getRaceView(slug, NOW + 1_000))!;
-    expect(view.config.demo).toBe(true);
-    expect(view.snapshot.complete).toBe(true);
-    expect(view.snapshot.finalOrder).toHaveLength(4);
-  });
-
-  it('unknown slug returns null', async () => {
-    expect(await getRaceView('nope-nope', NOW)).toBeNull();
-  });
-
-  it('grid/meters/events lengths are consistent as the horizon advances', async () => {
-    const { slug } = await createRace(
-      { teams: teams(6), durationMs: 300_000, startAtMs: NOW },
-      NOW,
-    );
-    let prevEvents = -1;
-    for (const dt of [30_000, 90_000, 150_000, 240_000]) {
-      const v = (await getRaceView(slug, NOW + dt))!;
-      if (v.snapshot.theme !== 'everest') throw new Error('expected everest');
-      expect(v.snapshot.events.length).toBeGreaterThanOrEqual(prevEvents);
-      prevEvents = v.snapshot.events.length;
-      expect(v.snapshot.meters.values[0][0].length).toBe(v.snapshot.meters.tMs.length);
-    }
+  it('olympics races flow through the same protocol', async () => {
+    const race = await createFull({ theme: 'olympics', startAtMs: NOW + 60_000 });
+    const mid = await envelope(race.slug, NOW + 60_000 + 200_000);
+    expect(mid.data.chunks.length).toBeGreaterThan(0);
+    expect(mid.raw).not.toContain('"finalOrder"');
+    const done = await envelope(race.slug, NOW + 60_000 + 600_001);
+    expect(done.data.complete).toBe(true);
+    expect(done.data.finals).not.toBeNull();
   });
 });

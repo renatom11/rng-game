@@ -175,6 +175,21 @@ export function toJourneySnapshot<T extends 'everest' | 'space'>(
     opts.sinceMs !== undefined && opts.sinceMs >= 0 && opts.sinceMs <= horizonMs
       ? opts.sinceMs
       : -1;
+  return toJourneyWindow(theme, timeline, sinceMs, horizonMs);
+}
+
+/**
+ * Exact-window slice covering (sinceMs, horizonMs] — the primitive both the
+ * classic horizon serving and the chunk protocol build on. sinceMs = -1
+ * includes the static fields (climbers, colors, storms, ...).
+ */
+export function toJourneyWindow<T extends 'everest' | 'space'>(
+  theme: T,
+  timeline: EverestTimeline,
+  sinceMs: number,
+  horizonMs: number,
+): JourneySnapshot & { theme: T } {
+  const { core } = timeline;
   const delta = sinceMs >= 0;
   const [glo, ghi] = windowRange(core.grid.tMs, sinceMs, horizonMs);
   const [slo, shi] = windowRange(timeline.displayTrack.tMs, sinceMs, horizonMs);
@@ -258,6 +273,16 @@ export function toOlympicsSnapshot(
     opts.sinceMs !== undefined && opts.sinceMs >= 0 && opts.sinceMs <= horizonMs
       ? opts.sinceMs
       : -1;
+  return toOlympicsWindow(timeline, sinceMs, horizonMs);
+}
+
+/** Exact-window slice for the Olympics shape; see toJourneyWindow. */
+export function toOlympicsWindow(
+  timeline: OlympicsTimeline,
+  sinceMs: number,
+  horizonMs: number,
+): OlympicsSnapshot {
+  const { core } = timeline;
   const delta = sinceMs >= 0;
   const inWindow = (t: number) => t > sinceMs && t <= horizonMs;
 

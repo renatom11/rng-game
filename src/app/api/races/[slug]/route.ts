@@ -1,5 +1,4 @@
-import { NextResponse } from 'next/server';
-import { getRaceView } from '@/lib/races';
+import { buildEnvelope } from '@/lib/raceApi';
 
 export const runtime = 'nodejs';
 
@@ -8,17 +7,23 @@ export async function GET(
   { params }: { params: Promise<{ slug: string }> },
 ) {
   const { slug } = await params;
-  const sinceRaw = new URL(req.url).searchParams.get('since');
-  const since = sinceRaw === null ? undefined : Number(sinceRaw);
-  const view = await getRaceView(
+  const cursorRaw = new URL(req.url).searchParams.get('cursor');
+  const cursor = cursorRaw === null ? -1 : Number(cursorRaw);
+  const body = await buildEnvelope(
     slug,
     Date.now(),
-    since !== undefined && Number.isFinite(since) ? since : undefined,
+    Number.isInteger(cursor) && cursor >= -1 ? cursor : -1,
   );
-  if (!view) {
-    return NextResponse.json({ error: 'race not found' }, { status: 404 });
+  if (body === null) {
+    return new Response(JSON.stringify({ error: 'race not found' }), {
+      status: 404,
+      headers: { 'content-type': 'application/json' },
+    });
   }
-  return NextResponse.json(view, {
-    headers: { 'cache-control': 'no-store' },
+  return new Response(body, {
+    headers: {
+      'content-type': 'application/json',
+      'cache-control': 'no-store',
+    },
   });
 }

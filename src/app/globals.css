@@ -450,6 +450,13 @@ button { font-family: inherit; }
 .mtn-death-big { font-size: 19px; }
 .mtn-legend-label { fill: var(--snow-dim); font-size: 13px; }
 
+/* fairness verification */
+.verify { margin: 0.9rem 0 0.4rem; }
+.verify-line { font-size: 0.8rem; color: var(--snow-dim); line-height: 1.5; display: block; }
+.verify-line code { font-size: 0.68rem; word-break: break-all; color: var(--snow-dim); }
+.verify-pass { color: var(--ok); }
+.verify-fail { color: var(--danger); font-weight: 600; }
+
 /* recovery code banner + restore */
 .code-banner {
   background: var(--bg-panel);

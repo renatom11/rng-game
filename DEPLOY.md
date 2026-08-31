@@ -1,4 +1,4 @@
-# Deploying Summit to Cloudflare
+# Deploying Summit to Cloudflare — free tier
 
 Every push to the main development branch auto-deploys to Cloudflare Workers
 (`.github/workflows/deploy.yml`) once the one-time setup below is done. The
@@ -6,15 +6,21 @@ app runs on Workers via the OpenNext adapter with races stored in D1
 (Cloudflare's SQLite); locally and in tests it keeps using the plain SQLite
 file, chosen automatically by `src/lib/storage.ts`.
 
+**The whole thing fits the FREE Workers plan.** Under the chunk protocol the
+server never generates or parses a race: the creator's browser generates the
+timeline from a server-committed seed and uploads it pre-sliced; the Worker
+only commits seeds, stores chunk strings, and serves them by clock
+arithmetic — all well inside the free tier's ~10ms CPU budget. (Fairness is
+covered from both ends: the seed is drawn server-side before any client code
+runs, recovery codes are HMAC-signed so a forged seed can't enter through
+`/restore`, and after the finish the seed is revealed so any viewer's
+browser can regenerate the race and verify every served byte — the "Verify
+fairness" button on the results page.)
+
 ## One-time setup (~10 minutes)
 
-1. **Workers paid plan ($5/mo).** In the Cloudflare dashboard → Workers &
-   Pages → Plans, enable the Workers Paid plan. Required: generating a race
-   takes ~50–200ms of CPU, and the free tier caps requests at 10ms. Reads
-   (people watching a race) are cheap; this only matters for creation.
-
-2. **Create the D1 database** (needs [wrangler login] once, or do it in the
-   dashboard under Storage & Databases → D1):
+1. **Create the D1 database** (needs `npx wrangler login` once, or do it in
+   the dashboard under Storage & Databases → D1):
 
    ```bash
    npx wrangler login
@@ -23,6 +29,14 @@ file, chosen automatically by `src/lib/storage.ts`.
 
    Copy the printed `database_id` into `wrangler.jsonc` (replacing
    `REPLACE_WITH_YOUR_D1_DATABASE_ID`), commit, push.
+
+2. **Set the code-signing secret** (protects recovery codes from forgery).
+   After the first deploy, in the dashboard: the `summit` Worker → Settings
+   → Variables and Secrets → add secret `SUMMIT_CODE_SECRET` with any long
+   random string (or `npx wrangler secret put SUMMIT_CODE_SECRET` once the
+   Worker exists). Keep a copy — a fresh deployment needs the same secret
+   for old recovery codes to keep working. Until it is set, a built-in dev
+   default is used (fine for trying things out, not for real draft night).
 
 3. **Create an API token** for deploys: dashboard → My Profile → API Tokens
    → Create Token → use the **Edit Cloudflare Workers** template, and add

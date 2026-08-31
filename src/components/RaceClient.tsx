@@ -11,6 +11,7 @@ import type {
 
 type AnyJourneySnapshot = EverestSnapshot | SpaceSnapshot;
 import { standingsAt } from '@/lib/client/raceState';
+import { TEAM_PALETTE } from '@/themes/everest/names';
 import { EVEREST_JOURNEY, type JourneyTheme } from '@/lib/client/journeyTheme';
 import { SPACE_JOURNEY } from '@/lib/client/spaceTheme';
 import { olyPhaseLabel, olyStandingsAt } from '@/lib/client/olympicsState';
@@ -28,6 +29,8 @@ import { FinaleSidebar } from './FinaleSidebar';
 import { ForecastStrip } from './ForecastStrip';
 import { RecoveryCodeBanner } from './RecoveryCodeBanner';
 import { ResultsRecap } from './ResultsRecap';
+import { VerifyFairness } from './VerifyFairness';
+import type { Theme } from '@/lib/races';
 import { MedalTable } from './olympics/MedalTable';
 import { LiveEventBoard } from './olympics/LiveEventBoard';
 import { OlympicsResults } from './olympics/OlympicsResults';
@@ -53,7 +56,7 @@ export function RaceClient({ slug }: { slug: string }) {
   // recap doesn't sit on a placeholder until the next scheduled poll.
   const needsFullPayload =
     !!view &&
-    !view.snapshot.complete &&
+    !view.snapshot?.complete &&
     (virtual ? clock.tMs : Date.now() + offsetMs - startAt) >= durationMs;
   useEffect(() => {
     if (needsFullPayload) {
@@ -88,6 +91,46 @@ export function RaceClient({ slug }: { slug: string }) {
   const tMs = virtual ? clock.tMs : realT;
 
   const scheduled = !virtual && realNow < startAt;
+
+  // No snapshot yet: the race shell exists but chunks haven't been earned
+  // (scheduled) or uploaded (preparing — the creator's browser is doing
+  // the generating under the chunk protocol).
+  if (!snap) {
+    if (scheduled || view.status === 'preparing') {
+      const fallbackColors = view.config.teams.map(
+        (t, i) => t.color ?? TEAM_PALETTE[i % TEAM_PALETTE.length][0],
+      );
+      return (
+        <main className="race-shell">
+          <RecoveryCodeBanner slug={slug} />
+          {view.status === 'preparing' ? (
+            <div className="center">
+              <h1 className="race-title">{view.config.title}</h1>
+              <p className="loading-line">
+                The organizers are charting the route… if this page was just
+                restored from a recovery code, keep the restoring tab open
+                until it finishes.
+              </p>
+            </div>
+          ) : (
+            <Countdown
+              startAt={startAt}
+              offsetMs={offsetMs}
+              teamNames={teamNames}
+              colors={fallbackColors}
+              title={view.config.title}
+            />
+          )}
+        </main>
+      );
+    }
+    return (
+      <main className="race-shell center">
+        <p className="loading-line">Contacting the officials…</p>
+      </main>
+    );
+  }
+
   const finished = tMs >= durationMs;
   const finale = !finished && tMs >= snap.pushStartMs;
   const showRecap = finished;
@@ -110,26 +153,34 @@ export function RaceClient({ slug }: { slug: string }) {
           startAt={startAt}
           offsetMs={offsetMs}
           teamNames={teamNames}
-          colors={snap.colors}
+          colors={snap.colors.length ? snap.colors : view.config.teams.map((t, i) => t.color ?? TEAM_PALETTE[i % TEAM_PALETTE.length][0])}
           title={view.config.title}
         />
       ) : showRecap ? (
-        snap.theme === 'olympics' ? (
-          <OlympicsResults
-            snap={snap}
-            teamNames={teamNames}
-            title={view.config.title}
-            onReplay={onReplay}
+        <>
+          {snap.theme === 'olympics' ? (
+            <OlympicsResults
+              snap={snap}
+              teamNames={teamNames}
+              title={view.config.title}
+              onReplay={onReplay}
+            />
+          ) : (
+            <ResultsRecap
+              snap={snap}
+              jt={journeyThemeFor(snap.theme)}
+              teamNames={teamNames}
+              title={view.config.title}
+              onReplay={onReplay}
+            />
+          )}
+          <VerifyFairness
+            slug={slug}
+            theme={view.config.theme as Theme}
+            teams={view.config.teams}
+            durationMs={durationMs}
           />
-        ) : (
-          <ResultsRecap
-            snap={snap}
-            jt={journeyThemeFor(snap.theme)}
-            teamNames={teamNames}
-            title={view.config.title}
-            onReplay={onReplay}
-          />
-        )
+        </>
       ) : snap.theme === 'olympics' ? (
         <OlympicsView
           snap={snap}
