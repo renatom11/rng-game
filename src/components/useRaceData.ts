@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { RaceView } from '@/lib/races';
 import { preLookaheadMs } from '@/lib/slice';
+import { mergeSnapshot } from '@/lib/client/mergeSnapshot';
 
 /**
  * Fetch + poll the race view. Keeps a server-clock offset (median of recent
@@ -29,45 +30,73 @@ export function useRaceData(slug: string): {
   const seqRef = useRef(0);
   const lastFetchRef = useRef(0);
 
-  const fetchOnce = useCallback(async () => {
-    const seq = ++seqRef.current;
-    const t0 = Date.now();
-    lastFetchRef.current = t0;
-    try {
-      const res = await fetch(`/api/races/${slug}`, { cache: 'no-store' });
-      const t1 = Date.now();
-      if (seq !== seqRef.current) return; // a newer request superseded us
-      if (!res.ok) {
-        setError(res.status === 404 ? 'not-found' : `error ${res.status}`);
-        return;
+  const fetchOnce = useCallback(
+    async (forceFull = false) => {
+      const seq = ++seqRef.current;
+      const t0 = Date.now();
+      lastFetchRef.current = t0;
+      // Delta cursor: ask only for what we don't have yet.
+      const prevAtSend = viewRef.current;
+      const since =
+        !forceFull &&
+        prevAtSend &&
+        !prevAtSend.snapshot.complete &&
+        prevAtSend.snapshot.horizonMs >= 0
+          ? prevAtSend.snapshot.horizonMs
+          : undefined;
+      try {
+        const url =
+          since === undefined
+            ? `/api/races/${slug}`
+            : `/api/races/${slug}?since=${since}`;
+        const res = await fetch(url, { cache: 'no-store' });
+        const t1 = Date.now();
+        if (seq !== seqRef.current) return; // a newer request superseded us
+        if (!res.ok) {
+          setError(res.status === 404 ? 'not-found' : `error ${res.status}`);
+          return;
+        }
+        const data = (await res.json()) as RaceView;
+        if (seq !== seqRef.current) return;
+        const prev = viewRef.current;
+
+        let snapshot = data.snapshot;
+        if (prev && snapshot.sinceMs >= 0) {
+          const merged = mergeSnapshot(prev.snapshot, snapshot);
+          if (!merged) {
+            // Cursor didn't chain (we changed underneath, or skew) — recover
+            // with a full fetch.
+            void fetchOnce(true);
+            return;
+          }
+          snapshot = merged;
+        } else if (
+          prev &&
+          !snapshot.complete &&
+          snapshot.horizonMs < prev.snapshot.horizonMs
+        ) {
+          // Never regress: a stale full response must not shrink our data.
+          return;
+        }
+
+        // Half-RTT clock offset estimate; keep the median of the last 5.
+        const sample = data.serverNow - (t0 + t1) / 2;
+        const arr = offsetsRef.current;
+        arr.push(sample);
+        if (arr.length > 5) arr.shift();
+        const sorted = [...arr].sort((a, b) => a - b);
+        offsetRef.current = sorted[Math.floor(sorted.length / 2)];
+        setOffsetMs(offsetRef.current);
+        const nextView = { ...data, snapshot };
+        viewRef.current = nextView;
+        setView(nextView);
+        setError(null);
+      } catch {
+        if (seq === seqRef.current) setError('network');
       }
-      const data = (await res.json()) as RaceView;
-      if (seq !== seqRef.current) return;
-      // Never regress: an out-of-order or clock-skewed response with a
-      // smaller horizon must not shrink what we already have.
-      const prev = viewRef.current;
-      if (
-        prev &&
-        !data.snapshot.complete &&
-        data.snapshot.horizonMs < prev.snapshot.horizonMs
-      ) {
-        return;
-      }
-      // Half-RTT clock offset estimate; keep the median of the last 5.
-      const sample = data.serverNow - (t0 + t1) / 2;
-      const arr = offsetsRef.current;
-      arr.push(sample);
-      if (arr.length > 5) arr.shift();
-      const sorted = [...arr].sort((a, b) => a - b);
-      offsetRef.current = sorted[Math.floor(sorted.length / 2)];
-      setOffsetMs(offsetRef.current);
-      viewRef.current = data;
-      setView(data);
-      setError(null);
-    } catch {
-      if (seq === seqRef.current) setError('network');
-    }
-  }, [slug]);
+    },
+    [slug],
+  );
 
   useEffect(() => {
     void fetchOnce();
@@ -81,7 +110,7 @@ export function useRaceData(slug: string): {
         if (t < -10_000) return 10_000; // countdown, no rush
         if (t < 0) return 2_000; // about to start
         if (t > v.snapshot.pushStartMs - 30_000) return 2_000; // finale
-        return Math.max(4_000, Math.min(15_000, preLookaheadMs(v.durationMs) / 2));
+        return Math.max(4_000, Math.min(30_000, preLookaheadMs(v.durationMs) / 2));
       })();
       if (Date.now() - lastFetchRef.current >= cadence) void fetchOnce();
     }, 1_000);

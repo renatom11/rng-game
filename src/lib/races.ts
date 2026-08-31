@@ -143,7 +143,11 @@ export interface RaceView {
   snapshot: PublicSnapshot;
 }
 
-export function getRaceView(slug: string, nowMs: number): RaceView | null {
+export function getRaceView(
+  slug: string,
+  nowMs: number,
+  sinceMs?: number,
+): RaceView | null {
   const row = getDb()
     .prepare('SELECT * FROM races WHERE id = ?')
     .get(slug) as
@@ -166,17 +170,24 @@ export function getRaceView(slug: string, nowMs: number): RaceView | null {
   const elapsed = status === 'scheduled' ? -1 : nowMs - row.start_at;
   const complete = config.demo || status === 'finished';
 
+  // Delta requests: only honored for running, incomplete races with a sane
+  // cursor; anything else falls back to a full snapshot.
+  const since =
+    !complete && sinceMs !== undefined && Number.isFinite(sinceMs) && sinceMs >= 0
+      ? Math.round(sinceMs)
+      : undefined;
+
   const snapshot: PublicSnapshot =
     config.theme === 'olympics'
       ? toOlympicsSnapshot(
           JSON.parse(row.timeline_json) as OlympicsTimeline,
           elapsed,
-          { complete },
+          { complete, sinceMs: since },
         )
       : toEverestSnapshot(
           JSON.parse(row.timeline_json) as EverestTimeline,
           elapsed,
-          { complete },
+          { complete, sinceMs: since },
         );
 
   return {

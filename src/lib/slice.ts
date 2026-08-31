@@ -26,9 +26,14 @@ import type { Checkpoint } from '@/engine/types';
  *   fast in the finale), so a devtools reader gains seconds, not the race.
  */
 
-/** Pre-push lookahead: 5–20s depending on duration. */
+/**
+ * Pre-push lookahead: 5–60s depending on duration. A bigger window is safe
+ * for long races because the spoiler guarantee is the hard cap at
+ * pushStartMs, not the lookahead size — this only trades a little weak-
+ * signal earliness for far fewer polls on all-day races.
+ */
 export function preLookaheadMs(durationMs: number): number {
-  return Math.min(20_000, Math.max(5_000, durationMs / 60));
+  return Math.min(60_000, Math.max(5_000, durationMs / 60));
 }
 
 /** Push-phase lookahead: 2.5–6s depending on duration. */
@@ -55,6 +60,8 @@ export function horizonFor(
 export interface EverestSnapshot {
   theme: 'everest';
   horizonMs: number;
+  /** -1 = full snapshot; otherwise a delta covering (sinceMs, horizonMs]. */
+  sinceMs: number;
   complete: boolean;
   climbers: EverestTimeline['climbers'];
   styles: EverestTimeline['styles'];
@@ -76,6 +83,8 @@ export interface EverestSnapshot {
 export interface OlympicsSnapshot {
   theme: 'olympics';
   horizonMs: number;
+  /** -1 = full snapshot; otherwise a delta covering (sinceMs, horizonMs]. */
+  sinceMs: number;
   complete: boolean;
   athletes: OlympicsTimeline['athletes'];
   colors: string[];
@@ -103,10 +112,21 @@ function lastIndexAtOrBefore(times: number[], tMs: number): number {
   return lo;
 }
 
+/** Slice window over sorted `times` covering (sinceMs, horizonMs]. */
+function windowRange(
+  times: number[],
+  sinceMs: number,
+  horizonMs: number,
+): [number, number] {
+  const lo = sinceMs < 0 ? 0 : lastIndexAtOrBefore(times, sinceMs) + 1;
+  const hi = lastIndexAtOrBefore(times, horizonMs) + 1;
+  return [lo, Math.max(lo, hi)];
+}
+
 export function toEverestSnapshot(
   timeline: EverestTimeline,
   elapsedMs: number,
-  opts: { complete: boolean },
+  opts: { complete: boolean; sinceMs?: number },
 ): EverestSnapshot {
   const { core } = timeline;
   const durationMs = core.grid.tMs[core.grid.tMs.length - 1];
@@ -115,6 +135,7 @@ export function toEverestSnapshot(
     return {
       theme: 'everest',
       horizonMs: durationMs,
+      sinceMs: -1,
       complete: true,
       climbers: timeline.climbers,
       styles: timeline.styles,
@@ -134,42 +155,51 @@ export function toEverestSnapshot(
   }
 
   const horizonMs = horizonFor(elapsedMs, durationMs, core.pushStartMs);
-  const gi = lastIndexAtOrBefore(core.grid.tMs, horizonMs);
-  const si = lastIndexAtOrBefore(timeline.displayTrack.tMs, horizonMs);
+  // Delta mode: serve only (sinceMs, horizonMs] and omit static fields —
+  // the client already holds them and concatenates the rest.
+  const sinceMs =
+    opts.sinceMs !== undefined && opts.sinceMs >= 0 && opts.sinceMs <= horizonMs
+      ? opts.sinceMs
+      : -1;
+  const delta = sinceMs >= 0;
+  const [glo, ghi] = windowRange(core.grid.tMs, sinceMs, horizonMs);
+  const [slo, shi] = windowRange(timeline.displayTrack.tMs, sinceMs, horizonMs);
+  const inWindow = (t: number) => t > sinceMs && t <= horizonMs;
 
   return {
     theme: 'everest',
     horizonMs,
+    sinceMs,
     complete: false,
-    climbers: timeline.climbers,
-    styles: timeline.styles,
-    colors: timeline.colors,
-    edgeRisk: timeline.edgeRisk,
+    climbers: delta ? [] : timeline.climbers,
+    styles: delta ? [] : timeline.styles,
+    colors: delta ? [] : timeline.colors,
+    edgeRisk: delta ? {} : timeline.edgeRisk,
     pushStartMs: core.pushStartMs,
-    events: timeline.events.filter((e) => e.tMs <= horizonMs),
-    checkpoints: core.checkpoints.filter((c) => c.tMs <= horizonMs),
+    events: timeline.events.filter((e) => inWindow(e.tMs)),
+    checkpoints: core.checkpoints.filter((c) => inWindow(c.tMs)),
     grid: {
-      tMs: core.grid.tMs.slice(0, gi + 1),
-      p: core.grid.p.map((row) => row.slice(0, gi + 1)),
+      tMs: core.grid.tMs.slice(glo, ghi),
+      p: core.grid.p.map((row) => row.slice(glo, ghi)),
     },
     displayTrack: {
-      tMs: timeline.displayTrack.tMs.slice(0, si + 1),
-      pos: timeline.displayTrack.pos.map((row) => row.slice(0, si + 1)),
+      tMs: timeline.displayTrack.tMs.slice(slo, shi),
+      pos: timeline.displayTrack.pos.map((row) => row.slice(slo, shi)),
     },
     meters: {
-      tMs: timeline.meters.tMs.slice(0, si + 1),
+      tMs: timeline.meters.tMs.slice(slo, shi),
       values: timeline.meters.values.map((teamRows) =>
-        teamRows.map((row) => row.slice(0, si + 1)),
+        teamRows.map((row) => row.slice(slo, shi)),
       ),
     },
-    wipeouts: timeline.wipeouts.filter((w) => w.tMs <= horizonMs),
+    wipeouts: timeline.wipeouts.filter((w) => inWindow(w.tMs)),
   };
 }
 
 export function toOlympicsSnapshot(
   timeline: OlympicsTimeline,
   elapsedMs: number,
-  opts: { complete: boolean },
+  opts: { complete: boolean; sinceMs?: number },
 ): OlympicsSnapshot {
   const { core } = timeline;
   const durationMs = core.grid.tMs[core.grid.tMs.length - 1];
@@ -178,6 +208,7 @@ export function toOlympicsSnapshot(
     return {
       theme: 'olympics',
       horizonMs: durationMs,
+      sinceMs: -1,
       complete: true,
       athletes: timeline.athletes,
       colors: timeline.colors,
@@ -192,23 +223,30 @@ export function toOlympicsSnapshot(
   }
 
   const horizonMs = horizonFor(elapsedMs, durationMs, core.pushStartMs);
+  const sinceMs =
+    opts.sinceMs !== undefined && opts.sinceMs >= 0 && opts.sinceMs <= horizonMs
+      ? opts.sinceMs
+      : -1;
+  const delta = sinceMs >= 0;
+  const inWindow = (t: number) => t > sinceMs && t <= horizonMs;
 
   return {
     theme: 'olympics',
     horizonMs,
+    sinceMs,
     complete: false,
-    athletes: timeline.athletes,
-    colors: timeline.colors,
+    athletes: delta ? [] : timeline.athletes,
+    colors: delta ? [] : timeline.colors,
     pushStartMs: core.pushStartMs,
-    schedule: timeline.schedule,
-    pointsKeyframes: timeline.pointsKeyframes.filter((f) => f.tMs <= horizonMs),
+    schedule: delta ? [] : timeline.schedule,
+    pointsKeyframes: timeline.pointsKeyframes.filter((f) => inWindow(f.tMs)),
     live: timeline.live.map((lv) => {
-      const li = lastIndexAtOrBefore(lv.tMs, horizonMs);
+      const [lo, hi] = windowRange(lv.tMs, sinceMs, horizonMs);
       return {
-        tMs: lv.tMs.slice(0, li + 1),
-        score: lv.score.map((row) => row.slice(0, li + 1)),
+        tMs: lv.tMs.slice(lo, hi),
+        score: lv.score.map((row) => row.slice(lo, hi)),
       };
     }),
-    events: timeline.events.filter((e) => e.tMs <= horizonMs),
+    events: timeline.events.filter((e) => inWindow(e.tMs)),
   };
 }
