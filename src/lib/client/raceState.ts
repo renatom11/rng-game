@@ -1,6 +1,7 @@
 import type { EverestSnapshot } from '@/lib/slice';
 import type { ClimberStatus, RaceEvent } from '@/themes/everest/types';
 import { METER_KEYS } from '@/themes/everest/types';
+import { nodeAtOrBelow } from '@/themes/everest/route';
 
 /**
  * Pure client-side race-state derivation: everything a component needs at
@@ -76,9 +77,23 @@ export function standingsAt(
   if (tMs > snap.pushStartMs && snap.grid.tMs.length > 0) {
     const summited = summitedOrder(snap, tMs);
     const summitedSet = new Set(summited);
+    // Wiped teams sink below every active team; multiple wipes rank by
+    // wipe time (later wipe = higher).
+    const wipedAt = new Map(
+      snap.wipeouts.filter((w) => w.tMs <= tMs).map((w) => [w.teamIdx, w.tMs]),
+    );
     const rest = Array.from({ length: nTeams }, (_, i) => i)
       .filter((i) => !summitedSet.has(i))
-      .sort((a, b) => progressAt(snap, b, tMs) - progressAt(snap, a, tMs) || a - b);
+      .sort((a, b) => {
+        const wa = wipedAt.get(a);
+        const wb = wipedAt.get(b);
+        if (wa !== undefined || wb !== undefined) {
+          if (wa === undefined) return -1;
+          if (wb === undefined) return 1;
+          return wb - wa;
+        }
+        return progressAt(snap, b, tMs) - progressAt(snap, a, tMs) || a - b;
+      });
     return [...summited, ...rest];
   }
   let latest: number[] | null = null;
@@ -107,6 +122,12 @@ export function momentum(
   tMs: number,
   windowMs: number,
 ): number[] {
+  // Before real standings exist there is no momentum — comparing against
+  // the identity-order fallback fabricates arrows out of nothing.
+  const firstCp = snap.checkpoints[0]?.tMs;
+  if (firstCp === undefined || tMs - windowMs < firstCp) {
+    return new Array(nTeams).fill(0);
+  }
   const now = standingsAt(snap, nTeams, tMs);
   const before = standingsAt(snap, nTeams, tMs - windowMs);
   const rankNow = new Map(now.map((t, i) => [t, i]));
@@ -142,7 +163,11 @@ export function teamStatesAt(
     if (e.activity) s.activity = e.activity;
     if (e.type === 'fork_choice' && e.edgeId) s.edgeId = e.edgeId;
     if (e.type === 'climber_fall' && e.climberIdx !== undefined) {
-      s.climberStatus[e.climberIdx] = 'fallen';
+      // A climber who already turned back is off the mountain — they can't
+      // fall from it (defense in depth; generation avoids this too).
+      if (s.climberStatus[e.climberIdx] !== 'turned-back') {
+        s.climberStatus[e.climberIdx] = 'fallen';
+      }
     }
     if (e.type === 'climber_injured' && e.climberIdx !== undefined) {
       if (s.climberStatus[e.climberIdx] === 'climbing') {
@@ -161,6 +186,40 @@ export function teamStatesAt(
       );
     }
     if (e.type === 'summit') s.activity = 'Summited';
+  }
+
+  // Motion-aware activity: event-carried labels go stale between throttled
+  // events ("Resting" while the marker visibly climbs), so derive the
+  // day-to-day label from actual display motion. Terminal states win.
+  const dtStep =
+    snap.displayTrack.tMs.length > 1
+      ? snap.displayTrack.tMs[1] - snap.displayTrack.tMs[0]
+      : 5_000;
+  const lookback = dtStep * 1.6;
+  for (let i = 0; i < nTeams; i++) {
+    const s = states[i];
+    if (s.wiped || s.activity === 'Summited') continue;
+    if (snap.displayTrack.tMs.length < 2 || tMs < lookback) continue;
+    const pos = interpAt(snap.displayTrack.tMs, snap.displayTrack.pos[i], tMs);
+    const prev = interpAt(
+      snap.displayTrack.tMs,
+      snap.displayTrack.pos[i],
+      tMs - lookback,
+    );
+    const d = pos - prev;
+    const thresh = 0.0012;
+    if (d > thresh) {
+      // keep a route label if one is current, else generic climbing
+      if (!s.activity.startsWith('On ')) s.activity = 'Climbing';
+    } else if (d < -thresh) {
+      s.activity = 'Descending to rest';
+    } else {
+      const camp = nodeAtOrBelow(pos + 0.015);
+      s.activity =
+        Math.abs(camp.frac - pos) < 0.02
+          ? `Resting at ${camp.label}`
+          : 'Holding position';
+    }
   }
   return states;
 }

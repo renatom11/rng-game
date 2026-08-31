@@ -13,9 +13,44 @@ import type { Checkpoint } from '@/engine/types';
  * smooth between polls). Everything that would reveal the future — the
  * final order, summit times, future events/curves/checkpoints/results —
  * never leaves the server. Demo races and finished races get everything.
+ *
+ * The lookahead is the leak budget, so it is duration-aware and phased —
+ * a fixed 60s lookahead once equaled the minimum race duration (whole
+ * timeline served at t=0) and exceeded the entire convergence window of
+ * short races (the ending shipped before it played out):
+ *
+ * - scheduled races serve nothing but static config;
+ * - pre-push, the horizon may run a modest lookahead ahead but is HARD
+ *   CAPPED at pushStartMs — no convergence-phase data ever ships early;
+ * - during the push, the lookahead shrinks to a few seconds (clients poll
+ *   fast in the finale), so a devtools reader gains seconds, not the race.
  */
 
-export const LOOKAHEAD_MS = 60_000;
+/** Pre-push lookahead: 5–20s depending on duration. */
+export function preLookaheadMs(durationMs: number): number {
+  return Math.min(20_000, Math.max(5_000, durationMs / 60));
+}
+
+/** Push-phase lookahead: 2.5–6s depending on duration. */
+export function pushLookaheadMs(durationMs: number): number {
+  return Math.max(2_500, Math.min(6_000, durationMs * 0.004));
+}
+
+/**
+ * The horizon: the latest timeline instant a running race's snapshot may
+ * include. `elapsedMs < 0` means the race has not started (serve nothing).
+ */
+export function horizonFor(
+  elapsedMs: number,
+  durationMs: number,
+  pushStartMs: number,
+): number {
+  if (elapsedMs < 0) return -1;
+  if (elapsedMs < pushStartMs) {
+    return Math.min(pushStartMs, elapsedMs + preLookaheadMs(durationMs));
+  }
+  return Math.min(durationMs, elapsedMs + pushLookaheadMs(durationMs));
+}
 
 export interface EverestSnapshot {
   theme: 'everest';
@@ -98,7 +133,7 @@ export function toEverestSnapshot(
     };
   }
 
-  const horizonMs = Math.min(durationMs, Math.max(0, elapsedMs) + LOOKAHEAD_MS);
+  const horizonMs = horizonFor(elapsedMs, durationMs, core.pushStartMs);
   const gi = lastIndexAtOrBefore(core.grid.tMs, horizonMs);
   const si = lastIndexAtOrBefore(timeline.displayTrack.tMs, horizonMs);
 
@@ -156,7 +191,7 @@ export function toOlympicsSnapshot(
     };
   }
 
-  const horizonMs = Math.min(durationMs, Math.max(0, elapsedMs) + LOOKAHEAD_MS);
+  const horizonMs = horizonFor(elapsedMs, durationMs, core.pushStartMs);
 
   return {
     theme: 'olympics',

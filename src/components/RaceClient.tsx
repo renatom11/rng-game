@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import type { EverestSnapshot, OlympicsSnapshot } from '@/lib/slice';
 import { phaseAt, standingsAt } from '@/lib/client/raceState';
@@ -22,7 +22,7 @@ import { LiveEventBoard } from './olympics/LiveEventBoard';
 import { OlympicsResults } from './olympics/OlympicsResults';
 
 export function RaceClient({ slug }: { slug: string }) {
-  const { view, error, offsetMs } = useRaceData(slug);
+  const { view, error, offsetMs, refresh } = useRaceData(slug);
   const [replaying, setReplaying] = useState(false);
   const [selected, setSelected] = useState<number | null>(null);
 
@@ -37,6 +37,20 @@ export function RaceClient({ slug }: { slug: string }) {
     () => view?.config.teams.map((t) => t.name) ?? [],
     [view],
   );
+
+  // The instant the clock crosses the finish, fetch the full payload so the
+  // recap doesn't sit on a placeholder until the next scheduled poll.
+  const needsFullPayload =
+    !!view &&
+    !view.snapshot.complete &&
+    (virtual ? clock.tMs : Date.now() + offsetMs - startAt) >= durationMs;
+  useEffect(() => {
+    if (needsFullPayload) {
+      void refresh();
+      const retry = setInterval(() => void refresh(), 3_000);
+      return () => clearInterval(retry);
+    }
+  }, [needsFullPayload, refresh]);
 
   if (error === 'not-found') {
     return (
@@ -69,7 +83,10 @@ export function RaceClient({ slug }: { slug: string }) {
 
   const onReplay = () => {
     clock.scrubTo(0);
-    clock.setSpeed(demo ? 60 : Math.max(60, Math.round(durationMs / 90_000)));
+    // Aim for a ~90s replay regardless of the original duration.
+    clock.setSpeed(
+      Math.min(600, Math.max(1, Math.round(durationMs / 90_000))),
+    );
     clock.setPlaying(true);
     setReplaying(true);
   };

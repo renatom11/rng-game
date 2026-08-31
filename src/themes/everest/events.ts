@@ -138,6 +138,9 @@ export function buildEvents(input: BuildEventsInput): RaceEvent[] {
   const moveThresh = Math.max(2, Math.round(n / 6));
   for (const tr of traversals) {
     if (wipedAt.has(tr.teamIdx) && tr.tMs >= wipedAt.get(tr.teamIdx)!) continue;
+    // During the push the story is on the upper mountain: a lower-mountain
+    // fork "choice" at that point is display catch-up, not a decision.
+    if (tr.tMs >= core.pushStartMs && tr.segIdx < 4) continue;
     const seg = SEGMENTS[tr.segIdx];
     if (seg.edges.length > 1) {
       events.push({
@@ -241,6 +244,8 @@ export function buildEvents(input: BuildEventsInput): RaceEvent[] {
           const rival = Object.keys(ranks)
             .map(Number)
             .find((r) => ranks[r] === ranks[team] + 1);
+          // Never narrate overtaking a team the mountain has already taken.
+          if (rival !== undefined && wipedAt.has(rival) && t >= wipedAt.get(rival)!) continue;
           const alt = altitudeAt(displayAtTime(displayTrack, team, t));
           events.push({
             tMs: t, type: 'overtake', teamIdx: team,
@@ -260,51 +265,80 @@ export function buildEvents(input: BuildEventsInput): RaceEvent[] {
   }
 
   // --- Fate: falls, injuries, turn-backs, wipeouts -------------------------
-  const fallenCount = new Map<number, number>();
-  for (const f of fate.falls) {
+  // Climber identities are drawn randomly among the ELIGIBLE: never the
+  // expedition leader (index 0) or the sirdar — both keep speaking in
+  // commentary — and never a climber already fallen or turned back. A
+  // deterministic formula here once made the sirdar always fall first, then
+  // keep narrating from beyond the bergschrund.
+  const fated: Set<number>[] = climbers.map(() => new Set<number>());
+  const protectedIdx = (teamIdx: number): Set<number> => {
+    const s = new Set<number>([0]);
+    climbers[teamIdx].forEach((c, i) => {
+      if (c.role === 'Sirdar') s.add(i);
+    });
+    return s;
+  };
+  const pickVictim = (teamIdx: number): number | null => {
+    const off = protectedIdx(teamIdx);
+    const eligible = climbers[teamIdx]
+      .map((_, i) => i)
+      .filter((i) => !off.has(i) && !fated[teamIdx].has(i));
+    if (eligible.length === 0) return null;
+    return eligible[randInt(rng, 0, eligible.length - 1)];
+  };
+
+  // Fates are ordered by time so eligibility folds forward correctly.
+  const fateStream = [
+    ...fate.falls.map((f) => ({ ...f, kind: 'fall' as const })),
+    ...fate.injuries.map((f) => ({ ...f, kind: 'injury' as const })),
+    ...fate.turnedBack.map((f) => ({ ...f, kind: 'turnback' as const })),
+  ].sort((a, b) => a.tMs - b.tMs);
+
+  for (const f of fateStream) {
     const squad = climbers[f.teamIdx];
-    const already = fallenCount.get(f.teamIdx) ?? 0;
-    const idx = Math.min(squad.length - 1 - already, 1 + (already % Math.max(1, squad.length - 2)));
-    const climberIdx = Math.max(1, idx);
-    fallenCount.set(f.teamIdx, already + 1);
-    const alt = altitudeAt(displayAtTime(displayTrack, f.teamIdx, f.tMs));
-    const edge = nearestEdgeLabel(traversals, f.teamIdx, f.tMs);
-    events.push({
-      tMs: f.tMs, type: 'climber_fall', teamIdx: f.teamIdx, climberIdx, severity: 3,
-      text: line('climber_fall', {
-        ...ctxFor(f.teamIdx),
-        climber: squad[climberIdx].name,
-        role: squad[climberIdx].role.toLowerCase(),
-        alt,
-        edge,
-      }),
-    });
-    nudgeMeter(meters, f.teamIdx, METER_INDEX.MORALE, times, f.tMs, -16);
-    nudgeMeter(meters, f.teamIdx, METER_INDEX.MED, times, f.tMs, -8);
-  }
-  for (const inj of fate.injuries) {
-    const squad = climbers[inj.teamIdx];
-    const climberIdx = randInt(rng, 1, squad.length - 1);
-    events.push({
-      tMs: inj.tMs, type: 'climber_injured', teamIdx: inj.teamIdx, climberIdx, severity: 2,
-      text: line('climber_injured', {
-        ...ctxFor(inj.teamIdx),
-        climber: squad[climberIdx].name,
-        trouble: pick(rng, TROUBLES),
-      }),
-    });
-    nudgeMeter(meters, inj.teamIdx, METER_INDEX.MED, times, inj.tMs, -14);
-  }
-  for (const tb of fate.turnedBack) {
-    const squad = climbers[tb.teamIdx];
-    const climberIdx = randInt(rng, 1, squad.length - 1);
-    events.push({
-      tMs: tb.tMs, type: 'climber_turned_back', teamIdx: tb.teamIdx, climberIdx, severity: 2,
-      text: line('climber_turned_back', {
-        ...ctxFor(tb.teamIdx),
-        climber: squad[climberIdx].name,
-      }),
-    });
+    if (f.kind === 'fall') {
+      const climberIdx = pickVictim(f.teamIdx);
+      if (climberIdx === null) continue;
+      fated[f.teamIdx].add(climberIdx);
+      const alt = altitudeAt(displayAtTime(displayTrack, f.teamIdx, f.tMs));
+      const edge = nearestEdgeLabel(traversals, f.teamIdx, f.tMs);
+      events.push({
+        tMs: f.tMs, type: 'climber_fall', teamIdx: f.teamIdx, climberIdx, severity: 3,
+        text: line('climber_fall', {
+          ...ctxFor(f.teamIdx),
+          climber: squad[climberIdx].name,
+          role: squad[climberIdx].role.toLowerCase(),
+          alt,
+          edge,
+        }),
+      });
+      nudgeMeter(meters, f.teamIdx, METER_INDEX.MORALE, times, f.tMs, -16);
+      nudgeMeter(meters, f.teamIdx, METER_INDEX.MED, times, f.tMs, -8);
+    } else if (f.kind === 'injury') {
+      const climberIdx = pickVictim(f.teamIdx);
+      if (climberIdx === null) continue;
+      // injured climbers stay on the mountain — not added to `fated`
+      events.push({
+        tMs: f.tMs, type: 'climber_injured', teamIdx: f.teamIdx, climberIdx, severity: 2,
+        text: line('climber_injured', {
+          ...ctxFor(f.teamIdx),
+          climber: squad[climberIdx].name,
+          trouble: pick(rng, TROUBLES),
+        }),
+      });
+      nudgeMeter(meters, f.teamIdx, METER_INDEX.MED, times, f.tMs, -14);
+    } else {
+      const climberIdx = pickVictim(f.teamIdx);
+      if (climberIdx === null) continue;
+      fated[f.teamIdx].add(climberIdx);
+      events.push({
+        tMs: f.tMs, type: 'climber_turned_back', teamIdx: f.teamIdx, climberIdx, severity: 2,
+        text: line('climber_turned_back', {
+          ...ctxFor(f.teamIdx),
+          climber: squad[climberIdx].name,
+        }),
+      });
+    }
   }
   for (const w of fate.wipeouts) {
     events.push({
@@ -354,6 +388,9 @@ export function buildEvents(input: BuildEventsInput): RaceEvent[] {
   const nUpdates = Math.min(12, Math.max(4, Math.round(durationMs / 300_000)));
   for (let k = 1; k <= nUpdates; k++) {
     const t = Math.round((durationMs * k) / (nUpdates + 1));
+    // No table-reads during the push: checkpoint standings are stale there
+    // (a wiped team could still "lead"), and the live finale board covers it.
+    if (t > core.pushStartMs) continue;
     const cp = lastCheckpointAt(core, t);
     if (!cp) continue;
     events.push({
@@ -370,10 +407,32 @@ export function buildEvents(input: BuildEventsInput): RaceEvent[] {
   const targetAmbient = Math.min(380, Math.max(28, Math.round(durationMs / 90_000) + 24));
   const maxGap = Math.max(45_000, durationMs / 40);
   const ambient: RaceEvent[] = [];
+  // Radio chatter must come from the living: never from a wiped team, and
+  // teams that have lost a climber don't get "all accounted for" banter.
+  const fallTimes = new Map<number, number>();
+  for (const e of events) {
+    if (e.type === 'climber_fall' && e.teamIdx !== undefined) {
+      const prev = fallTimes.get(e.teamIdx);
+      if (prev === undefined || e.tMs < prev) fallTimes.set(e.teamIdx, e.tMs);
+    }
+  }
+  const intactTeamAt = (tMs: number): number | null => {
+    const candidates: number[] = [];
+    for (let i = 0; i < n; i++) {
+      const wiped = wipedAt.get(i);
+      const fell = fallTimes.get(i);
+      if ((wiped === undefined || tMs < wiped) && (fell === undefined || tMs < fell)) {
+        candidates.push(i);
+      }
+    }
+    if (candidates.length === 0) return null;
+    return candidates[randInt(rng, 0, candidates.length - 1)];
+  };
   const addAmbient = (tMs: number) => {
     const roll = rng();
-    if (roll < 0.4) {
-      ambient.push({ tMs, type: 'radio', severity: 0, text: line('radio', { camp: pick(rng, NODES).label, team: teamNames[randInt(rng, 0, n - 1)], sherpa: pick(rng, cast.sirdar) }) });
+    const radioTeam = intactTeamAt(tMs);
+    if (roll < 0.4 && radioTeam !== null) {
+      ambient.push({ tMs, type: 'radio', severity: 0, text: line('radio', { camp: pick(rng, NODES).label, team: teamNames[radioTeam], sherpa: cast.sirdar[radioTeam] }) });
     } else if (roll < 0.7) {
       ambient.push({ tMs, type: 'weather', severity: 0, text: line('weather', { weather: pick(rng, WEATHER_LINES) }) });
     } else {

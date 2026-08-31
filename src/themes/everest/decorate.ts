@@ -100,8 +100,20 @@ export function buildTraversals(
       }
     }
   }
-  out.sort((a, b) => a.tMs - b.tMs || a.teamIdx - b.teamIdx);
-  return out;
+  out.sort((a, b) => a.tMs - b.tMs || a.teamIdx - b.teamIdx || a.segIdx - b.segIdx);
+  // One display step can cross several segment boundaries in a short race —
+  // a team must not "commit" to three forks simultaneously. Keep only the
+  // highest segment per (team, instant).
+  const deduped: Traversal[] = [];
+  for (const tr of out) {
+    const prev = deduped[deduped.length - 1];
+    if (prev && prev.teamIdx === tr.teamIdx && prev.tMs === tr.tMs) {
+      deduped[deduped.length - 1] = tr; // later sort order = higher segIdx
+    } else {
+      deduped.push(tr);
+    }
+  }
+  return deduped;
 }
 
 function lastCheckpointBefore(core: CoreTimeline, tMs: number) {

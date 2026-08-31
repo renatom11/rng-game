@@ -167,7 +167,8 @@ function buildOlyEvents(input: {
     goldsSoFar.set(gold, golds);
     if (golds === 1 && k > 2 && rng() < 0.5) {
       events.push({
-        tMs: ev.endMs + Math.max(1000, durationMs * 0.001),
+        // clamp: a beat after the final event must not fall past the finish
+        tMs: Math.min(durationMs - 1, ev.endMs + Math.max(1000, durationMs * 0.001)),
         type: 'medal_moment',
         teamIdx: gold,
         severity: 2,
@@ -175,19 +176,22 @@ function buildOlyEvents(input: {
       });
     }
 
-    // Overall lead changes.
+    // Overall lead changes. The gap quoted is to the CURRENT runner-up —
+    // quoting the deposed leader with the runner-up's arithmetic once put a
+    // number on the board that contradicted the visible table.
     const leader = frame.order[0];
     if (prevLeader !== null && leader !== prevLeader) {
+      const runnerUp = frame.order[1] ?? prevLeader;
       events.push({
-        tMs: ev.endMs + Math.max(500, durationMs * 0.0005),
+        tMs: Math.min(durationMs - 1, ev.endMs + Math.max(500, durationMs * 0.0005)),
         type: 'lead_change',
         teamIdx: leader,
-        rivalIdx: prevLeader,
+        rivalIdx: runnerUp,
         severity: ev.marquee ? 3 : 2,
         text: line('lead_change', {
           team: teamNames[leader],
-          rival: teamNames[prevLeader],
-          gap: frame.points[leader] - frame.points[frame.order[1]],
+          rival: teamNames[runnerUp],
+          gap: frame.points[leader] - frame.points[runnerUp],
         }),
       });
     }

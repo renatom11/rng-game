@@ -38,7 +38,9 @@ export function useRaceClock(opts: {
     let last = performance.now();
     let lastSet = 0;
     const tick = (now: number) => {
-      const dt = now - last;
+      // Clamp the frame delta: rAF pauses in background tabs, and applying
+      // the whole gap at once would skip a virtual race to its finish.
+      const dt = Math.min(500, now - last);
       last = now;
       let t: number;
       if (virtual) {

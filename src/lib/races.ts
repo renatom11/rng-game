@@ -160,7 +160,10 @@ export function getRaceView(slug: string, nowMs: number): RaceView | null {
 
   const config = JSON.parse(row.config_json) as RaceConfigStored;
   const status = deriveStatus(nowMs, row.start_at, row.duration_ms);
-  const elapsed = status === 'scheduled' ? 0 : nowMs - row.start_at;
+  // Scheduled races serve nothing but static config (elapsed < 0 => empty
+  // horizon) — a fixed pre-start window once leaked a short race's whole
+  // timeline before the gun.
+  const elapsed = status === 'scheduled' ? -1 : nowMs - row.start_at;
   const complete = config.demo || status === 'finished';
 
   const snapshot: PublicSnapshot =

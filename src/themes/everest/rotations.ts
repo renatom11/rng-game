@@ -17,13 +17,21 @@ import { NODES, nodeById } from './route';
  * The track never influences the engine — it is derived FROM it.
  */
 
-/** Shared sparse grid for display + meters. */
-export function sparseTimes(durationMs: number): number[] {
+/**
+ * Shared sparse grid for display + meters. Structural extras (summit times,
+ * push start) are spliced in so the displayed marker hits the summit at the
+ * exact instant its summit event fires — with a plain grid, a team could be
+ * announced on top while drawn below the Hillary Step for one step.
+ */
+export function sparseTimes(durationMs: number, extraMs: number[] = []): number[] {
   const step = Math.max(5000, durationMs / 400);
-  const out: number[] = [];
-  for (let t = 0; t <= durationMs; t += step) out.push(Math.round(t));
-  if (out[out.length - 1] !== durationMs) out.push(durationMs);
-  return out;
+  const set = new Set<number>();
+  for (let t = 0; t <= durationMs; t += step) set.add(Math.round(t));
+  set.add(durationMs);
+  for (const t of extraMs) {
+    if (t >= 0 && t <= durationMs) set.add(Math.round(t));
+  }
+  return Array.from(set).sort((a, b) => a - b);
 }
 
 const C4_FRAC = nodeById.get('C4')!.frac; // 0.70 in display space
@@ -55,7 +63,10 @@ function buildCycles(
     const start = c * cycleLen + (c === 0 ? 0 : offset * (c % 2 === 0 ? 0.6 : 1));
     const end = Math.min(colApproachMs, (c + 1) * cycleLen + offset * 0.5);
     const dwellHigh = 0.12 + rng() * 0.1;
-    const descend = 0.12 + rng() * 0.08;
+    // Short races get shallow rotations: with only seconds per phase, deep
+    // descents leave the team too far from the Col to converge in time.
+    const shallow = durationMs < 900_000;
+    const descend = (0.12 + rng() * 0.08) * (shallow ? 0.6 : 1);
     const dwellLow = 0.1 + rng() * 0.12;
     const ascend = Math.max(0.3, 1 - dwellHigh - descend - dwellLow);
     const norm = ascend + dwellHigh + descend + dwellLow;
@@ -63,7 +74,7 @@ function buildCycles(
       startMs: start,
       endMs: end,
       shape: [ascend / norm, dwellHigh / norm, descend / norm, dwellLow / norm],
-      restDepth: rng() < 0.35 ? 2 : 1,
+      restDepth: shallow ? 1 : rng() < 0.35 ? 2 : 1,
     });
   }
   return cycles;
@@ -86,8 +97,16 @@ export function buildDisplayTrack(
   durationMs: number,
 ): { tMs: number[]; pos: number[][] } {
   const n = core.grid.p.length;
-  const tMs = sparseTimes(durationMs);
+  const tMs = sparseTimes(durationMs, [core.pushStartMs, ...core.summitTimesMs]);
   const pos: number[][] = [];
+
+  // Per-step motion caps scale with the sparse step so short races can
+  // actually move (a fixed cap strangled a 1-minute race), while long races
+  // keep stately, teleport-free motion.
+  const step = Math.max(5000, durationMs / 400);
+  const normalCap = Math.max(0.02, (step / durationMs) * 0.95);
+  const approachCap = normalCap * 2.25;
+  const pushCatch = normalCap * 3;
 
   for (let team = 0; team < n; team++) {
     const cycles = buildCycles(rng, durationMs, team, n);
@@ -100,9 +119,13 @@ export function buildDisplayTrack(
       let x: number;
 
       if (t >= core.pushStartMs) {
-        // The race line: affine map of p onto Col->Summit.
-        x = C4_FRAC + ((Math.max(p, HOLD_P) - HOLD_P) / (1 - HOLD_P)) * (1 - C4_FRAC);
+        // The race line: affine map of p onto Col->Summit, approached with
+        // a bounded catch-up so push start never teleports the marker.
+        const target =
+          C4_FRAC + ((Math.max(p, HOLD_P) - HOLD_P) / (1 - HOLD_P)) * (1 - C4_FRAC);
+        x = Math.min(target, lastPos + pushCatch);
         x = Math.max(x, lastPos); // monotone during the push
+        if (p >= 1 - 1e-6) x = 1; // the summit moment is exact
       } else if (u >= COL_APPROACH_U) {
         // Converge on the South Col: ease from wherever we are toward C4,
         // arrival staggered naturally by each team's p.
@@ -122,7 +145,9 @@ export function buildDisplayTrack(
           const cf = (t - cycle.startMs) / (cycle.endMs - cycle.startMs);
           const [a, dh, d, dl] = cycle.shape;
           const restCamp = NODES[Math.max(0, campIndexBelow(reach) - cycle.restDepth)];
-          const low = Math.min(restCamp.frac, reach);
+          let low = Math.min(restCamp.frac, reach);
+          // Short races: keep rest stops close enough to converge in time.
+          if (durationMs < 900_000) low = Math.max(low, reach - 0.2);
           if (cf < a) {
             // ascend from low toward reach
             const f = cf / a;
@@ -141,7 +166,7 @@ export function buildDisplayTrack(
       if (t < core.pushStartMs) {
         // Keep visible motion sane: no display teleports between sparse
         // steps. During the Col approach teams hustle — the window is open.
-        const cap = u >= COL_APPROACH_U ? 0.045 : 0.02;
+        const cap = u >= COL_APPROACH_U ? approachCap : normalCap;
         x = Math.max(lastPos - cap, Math.min(lastPos + cap, x));
       }
       x = Math.max(0, Math.min(1, x));

@@ -14,17 +14,20 @@ const ROLES = [
   'Weather Officer',
 ];
 
+// 'Tashi' and the surname 'Sherpa' are reserved for sirdars — sharing them
+// with the general pools once produced two different climbers both named
+// "Tashi Sherpa", one of them in the same squad as the other.
 const FIRST = [
   'Anya', 'Marco', 'Tenzin', 'Ingrid', 'Kenji', 'Rosa', 'Dmitri', 'Amara',
   'Lars', 'Priya', 'Sofia', 'Emil', 'Yuki', 'Owen', 'Freya', 'Nikolai',
-  'Carmen', 'Tashi', 'Elena', 'Piotr', 'Maren', 'Diego', 'Astrid', 'Rafael',
+  'Carmen', 'Elena', 'Piotr', 'Maren', 'Diego', 'Astrid', 'Rafael',
   'Nadia', 'Finn', 'Leila', 'Viktor', 'Greta', 'Mateo', 'Zoya', 'Henrik',
   'Alma', 'Stefan', 'Iris', 'Tomas', 'Vera', 'Andrei', 'Lucia', 'Bjorn',
 ];
 
 const LAST = [
   'Halvorsen', 'Okafor', 'Petrova', 'Sato', 'Lindqvist', 'Moreau', 'Katsaros',
-  'Novak', 'Fernandez', 'Berg', 'Takeda', 'Sherpa', 'Kovacs', 'Almeida',
+  'Novak', 'Fernandez', 'Berg', 'Takeda', 'Kovacs', 'Almeida',
   'Nilsen', 'Volkov', 'Marchetti', 'Haugen', 'Reyes', 'Dahl', 'Ivanov',
   'Costa', 'Larsen', 'Vasquez', 'Antonov', 'Strand', 'Romano', 'Eriksen',
   'Duarte', 'Sokolov', 'Meyer', 'Norgay', 'Bakker', 'Silva', 'Weiss',

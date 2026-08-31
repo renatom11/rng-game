@@ -144,7 +144,7 @@ export const TEMPLATES: Record<EventType, readonly string[]> = {
   radio: [
     'Radio chatter: "{camp}, this is {team}... all accounted for. Cold, but climbing."',
     '"Say again?" — wind swallows half of every sentence up here.',
-    'Base Camp logs the check-ins. All teams accounted for.',
+    'Base Camp logs the evening check-ins, one by one.',
     '"{sherpa} says the ice is talking tonight." Nobody asks what it is saying.',
     'A burst of static, then laughter, from somewhere near {camp}. Good sign.',
     '"Copy that, {team}. Keep your rotations honest." — Base Camp, signing off.',

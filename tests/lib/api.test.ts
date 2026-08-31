@@ -9,7 +9,7 @@ import {
   validateCreateInput,
   ValidationError,
 } from '@/lib/races';
-import { LOOKAHEAD_MS } from '@/lib/slice';
+import { horizonFor, preLookaheadMs, pushLookaheadMs } from '@/lib/slice';
 
 const NOW = 1_700_000_000_000;
 
@@ -36,18 +36,21 @@ describe('race storage & spoiler-proof serving', () => {
     expect(ok.startAtMs).toBe(NOW + 60_000);
   });
 
-  it('create -> fetch round trip, scheduled state', () => {
+  it('scheduled races serve nothing but static config', () => {
     const { slug } = createRace(
       { teams: teams(6), durationMs: 600_000, title: 'Draft Night' },
       NOW,
     );
     const view = getRaceView(slug, NOW + 1_000)!;
     expect(view.status).toBe('scheduled');
-    expect(view.config.title).toBe('Draft Night');
     expect(view.config.teams).toHaveLength(6);
-    // scheduled: nothing beyond the lookahead from t=0 leaks
     expect(view.snapshot.complete).toBe(false);
-    expect(view.snapshot.horizonMs).toBeLessThanOrEqual(LOOKAHEAD_MS);
+    expect(view.snapshot.horizonMs).toBe(-1);
+    expect(view.snapshot.events).toHaveLength(0);
+    if (view.snapshot.theme !== 'everest') throw new Error('expected everest');
+    expect(view.snapshot.grid.tMs).toHaveLength(0);
+    expect(view.snapshot.checkpoints).toHaveLength(0);
+    expect(view.snapshot.wipeouts).toHaveLength(0);
   });
 
   it('mid-race truncation never leaks the future or the outcome', () => {
@@ -61,7 +64,7 @@ describe('race storage & spoiler-proof serving', () => {
     const snap = view.snapshot;
     if (snap.theme !== 'everest') throw new Error('expected everest snapshot');
     const horizon = snap.horizonMs;
-    expect(horizon).toBe(300_000 + LOOKAHEAD_MS);
+    expect(horizon).toBe(300_000 + preLookaheadMs(600_000));
 
     expect(snap.finalOrder).toBeUndefined();
     expect(snap.finalRank).toBeUndefined();
@@ -80,6 +83,82 @@ describe('race storage & spoiler-proof serving', () => {
     expect(json).not.toContain('"finalOrder"');
     expect(json).not.toContain('"finalRank"');
     expect(json).not.toContain('"summitTimesMs"');
+  });
+
+  it('pre-push horizons are hard-capped at the push start (no convergence data early)', () => {
+    const duration = 600_000;
+    const { slug } = createRace(
+      { teams: teams(6), durationMs: duration, startAtMs: NOW },
+      NOW,
+    );
+    const view0 = getRaceView(slug, NOW)!;
+    const pushStart = view0.snapshot.pushStartMs;
+    for (const elapsed of [0, 100_000, pushStart - 10_000, pushStart - 1]) {
+      const v = getRaceView(slug, NOW + elapsed)!;
+      expect(v.snapshot.horizonMs).toBeLessThanOrEqual(pushStart);
+      if (v.snapshot.theme !== 'everest') throw new Error('expected everest');
+      expect(v.snapshot.wipeouts).toHaveLength(0); // wipes are all post-push
+    }
+  });
+
+  it('a minimum-duration race no longer serves its whole timeline at t=0', () => {
+    const { slug } = createRace(
+      { teams: teams(6), durationMs: 60_000, startAtMs: NOW },
+      NOW,
+    );
+    const v = getRaceView(slug, NOW + 100)!;
+    expect(v.status).toBe('running');
+    const snap = v.snapshot;
+    if (snap.theme !== 'everest') throw new Error('expected everest');
+    // Horizon covers only a few seconds — not the race.
+    expect(snap.horizonMs).toBeLessThanOrEqual(preLookaheadMs(60_000) + 100);
+    const lastGrid = snap.grid.tMs[snap.grid.tMs.length - 1] ?? 0;
+    expect(lastGrid).toBeLessThan(snap.pushStartMs);
+    // No team's served curve is anywhere near finished.
+    for (const row of snap.grid.p) {
+      for (const p of row) expect(p).toBeLessThan(0.9);
+    }
+  });
+
+  it('push-phase lookahead is a few seconds, not the finale', () => {
+    const duration = 600_000;
+    const { slug } = createRace(
+      { teams: teams(6), durationMs: duration, startAtMs: NOW },
+      NOW,
+    );
+    const pushStart = getRaceView(slug, NOW)!.snapshot.pushStartMs;
+    const elapsed = pushStart + 5_000;
+    const v = getRaceView(slug, NOW + elapsed)!;
+    expect(v.snapshot.horizonMs).toBe(
+      Math.min(duration, elapsed + pushLookaheadMs(duration)),
+    );
+    expect(horizonFor(elapsed, duration, pushStart)).toBe(v.snapshot.horizonMs);
+  });
+
+  it('olympics: marquee result keyframes never ship early', () => {
+    const duration = 300_000;
+    const { slug } = createRace(
+      {
+        teams: teams(6),
+        durationMs: duration,
+        startAtMs: NOW,
+        theme: 'olympics',
+      },
+      NOW,
+    );
+    // Pre-push: no marquee keyframes at all (they all end after pushStart).
+    const pre = getRaceView(slug, NOW + 200_000)!;
+    if (pre.snapshot.theme !== 'olympics') throw new Error('expected olympics');
+    expect(pre.snapshot.horizonMs).toBeLessThanOrEqual(pre.snapshot.pushStartMs);
+    // At 90% elapsed the closing keyframe (99.5%) is still unserved.
+    const late = getRaceView(slug, NOW + duration * 0.9)!;
+    if (late.snapshot.theme !== 'olympics') throw new Error('expected olympics');
+    const maxServed = Math.max(
+      0,
+      ...late.snapshot.pointsKeyframes.map((f) => f.tMs),
+    );
+    expect(maxServed).toBeLessThan(duration * 0.995);
+    expect(JSON.stringify(late)).not.toContain('"finalOrder"');
   });
 
   it('finished races disclose everything', () => {
