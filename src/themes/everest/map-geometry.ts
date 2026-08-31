@@ -171,9 +171,10 @@ export const SILHOUETTES: { path: string; fill: string }[] = [
 
 /** Deterministic star field (no RNG — fixed hash pattern). */
 export const STARS: [number, number, number][] = Array.from({ length: 90 }, (_, i) => {
-  const h = (i * 2654435761) % 4294967296;
-  const x = (h % 1000);
-  const y = ((h >> 10) % 520);
-  const r = 0.5 + ((h >> 20) % 10) / 12;
+  // unsigned shifts: a signed >> here once produced negative radii
+  const h = (i * 2654435761) >>> 0;
+  const x = h % 1000;
+  const y = (h >>> 10) % 520;
+  const r = 0.5 + ((h >>> 20) % 10) / 12;
   return [x, y, Math.round(r * 10) / 10];
 });
