@@ -12,10 +12,12 @@ import type {
 type AnyJourneySnapshot = EverestSnapshot | SpaceSnapshot;
 import { standingsAt } from '@/lib/client/raceState';
 import { EVEREST_JOURNEY, type JourneyTheme } from '@/lib/client/journeyTheme';
+import { SPACE_JOURNEY } from '@/lib/client/spaceTheme';
 import { olyPhaseLabel, olyStandingsAt } from '@/lib/client/olympicsState';
 import { useRaceData } from './useRaceData';
 import { useRaceClock } from './useRaceClock';
 import { MountainMap } from './MountainMap';
+import { SpaceMap } from './SpaceMap';
 import { Standings } from './Standings';
 import { CommentaryFeed } from './CommentaryFeed';
 import { PositionChart } from './PositionChart';
@@ -186,9 +188,8 @@ interface ViewProps<S> {
 }
 
 /** Resolve the client vocabulary for a journey theme id. */
-function journeyThemeFor(_theme: string): JourneyTheme {
-  // space registers its own vocabulary when the theme lands
-  return EVEREST_JOURNEY;
+function journeyThemeFor(theme: string): JourneyTheme {
+  return theme === 'space' ? SPACE_JOURNEY : EVEREST_JOURNEY;
 }
 
 /** The map component contract every journey theme's map satisfies. */
@@ -201,9 +202,8 @@ export interface JourneyMapProps {
   finale: boolean;
 }
 
-function journeyMapFor(_theme: string): React.ComponentType<JourneyMapProps> {
-  // space registers its own map when the theme lands
-  return MountainMap;
+function journeyMapFor(theme: string): React.ComponentType<JourneyMapProps> {
+  return theme === 'space' ? SpaceMap : MountainMap;
 }
 
 function JourneyView({

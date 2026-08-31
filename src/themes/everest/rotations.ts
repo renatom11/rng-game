@@ -35,7 +35,25 @@ export function sparseTimes(durationMs: number, extraMs: number[] = []): number[
 }
 
 const C4_FRAC = nodeById.get('C4')!.frac; // 0.70 in display space
-const COL_APPROACH_U = 0.78; // from here, converge on the Col
+const COL_APPROACH_U = 0.78; // from here, converge on the hold point
+
+/**
+ * Rest-stop geometry, so another journey theme (space) can reuse the
+ * choreography with its own waypoints. `restFracs` are the display fracs a
+ * team may drop back to between pushes; `forceShallow` keeps dips small
+ * regardless of duration (spacecraft loop back, they don't fly home).
+ */
+export interface RotationRoute {
+  restFracs: number[];
+  forceShallow?: boolean;
+}
+
+const EVEREST_ROTATION_ROUTE: RotationRoute = {
+  // Base Camp through Camp IV — the camps a squad can rest at.
+  restFracs: NODES.filter((n) =>
+    ['BC', 'C1', 'C2', 'C3', 'C4'].includes(n.id),
+  ).map((n) => n.frac),
+};
 
 interface Cycle {
   startMs: number;
@@ -51,6 +69,7 @@ function buildCycles(
   durationMs: number,
   teamIdx: number,
   nTeams: number,
+  forceShallow: boolean,
 ): Cycle[] {
   const colApproachMs = COL_APPROACH_U * durationMs;
   // 2–6 rotation cycles depending on duration; staggered start per team.
@@ -70,7 +89,7 @@ function buildCycles(
     const dwellHigh = 0.12 + rng() * 0.1;
     // Short races get shallow rotations: with only seconds per phase, deep
     // descents leave the team too far from the Col to converge in time.
-    const shallow = durationMs < 900_000;
+    const shallow = durationMs < 900_000 || forceShallow;
     const descend = (0.12 + rng() * 0.08) * (shallow ? 0.6 : 1);
     const dwellLow = 0.1 + rng() * 0.12;
     const ascend = Math.max(0.3, 1 - dwellHigh - descend - dwellLow);
@@ -85,13 +104,11 @@ function buildCycles(
   return cycles;
 }
 
-/** Highest camp node index whose display frac is <= x (in display space). */
-function campIndexBelow(x: number): number {
+/** Highest rest-frac index at or below x. */
+function restIndexBelow(restFracs: number[], x: number): number {
   let idx = 0;
-  for (let i = 0; i < NODES.length; i++) {
-    if (NODES[i].frac <= x + 1e-9 && NODES[i].id !== 'BALC' && NODES[i].id !== 'SSUM' && NODES[i].id !== 'HILL' && NODES[i].id !== 'SUMMIT') {
-      idx = i;
-    }
+  for (let i = 0; i < restFracs.length; i++) {
+    if (restFracs[i] <= x + 1e-9) idx = i;
   }
   return idx;
 }
@@ -100,6 +117,7 @@ export function buildDisplayTrack(
   rng: RNG,
   core: CoreTimeline,
   durationMs: number,
+  route: RotationRoute = EVEREST_ROTATION_ROUTE,
 ): { tMs: number[]; pos: number[][] } {
   const n = core.grid.p.length;
   const tMs = sparseTimes(durationMs, [core.pushStartMs, ...core.summitTimesMs]);
@@ -114,7 +132,7 @@ export function buildDisplayTrack(
   const pushCatch = normalCap * 3;
 
   for (let team = 0; team < n; team++) {
-    const cycles = buildCycles(rng, durationMs, team, n);
+    const cycles = buildCycles(rng, durationMs, team, n, route.forceShallow ?? false);
     const row: number[] = [];
     let lastPos = 0;
 
@@ -149,10 +167,13 @@ export function buildDisplayTrack(
         } else {
           const cf = (t - cycle.startMs) / (cycle.endMs - cycle.startMs);
           const [a, dh, d, dl] = cycle.shape;
-          const restCamp = NODES[Math.max(0, campIndexBelow(reach) - cycle.restDepth)];
-          let low = Math.min(restCamp.frac, reach);
-          // Short races: keep rest stops close enough to converge in time.
-          if (durationMs < 900_000) low = Math.max(low, reach - 0.2);
+          const restFrac =
+            route.restFracs[
+              Math.max(0, restIndexBelow(route.restFracs, reach) - cycle.restDepth)
+            ];
+          let low = Math.min(restFrac, reach);
+          // Short races / shallow themes: keep rest stops close enough.
+          if (durationMs < 900_000 || route.forceShallow) low = Math.max(low, reach - 0.2);
           if (cf < a) {
             // ascend from low toward reach
             const f = cf / a;

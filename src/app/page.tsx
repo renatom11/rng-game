@@ -14,11 +14,16 @@ const DEMO_OLYMPICS = [
   'Wakanda', 'Genovia', 'Latveria', 'Elbonia',
 ];
 
+const DEMO_SPACE = [
+  'Ad Astra Per Pizza', 'The Von Braunies', 'Red Dirt Racing', 'Escape Velocity',
+  'Major Tomfoolery', 'The Oxidizers', 'Slingshot Society', 'Crimson Horizon',
+];
+
 export default function Home() {
   const router = useRouter();
   const [busy, setBusy] = useState<string | null>(null);
 
-  const watchDemo = async (theme: 'everest' | 'olympics') => {
+  const watchDemo = async (theme: 'everest' | 'olympics' | 'space') => {
     setBusy(theme);
     try {
       const res = await fetch('/api/races', {
@@ -26,10 +31,18 @@ export default function Home() {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           theme,
-          title: theme === 'olympics' ? 'Demo Games' : 'Demo Expedition',
-          teams: (theme === 'olympics' ? DEMO_OLYMPICS : DEMO_EVEREST).map(
-            (name) => ({ name }),
-          ),
+          title:
+            theme === 'olympics'
+              ? 'Demo Games'
+              : theme === 'space'
+                ? 'Demo Mars Run'
+                : 'Demo Expedition',
+          teams: (theme === 'olympics'
+            ? DEMO_OLYMPICS
+            : theme === 'space'
+              ? DEMO_SPACE
+              : DEMO_EVEREST
+          ).map((name) => ({ name })),
           durationMs: 600_000,
           demo: true,
         }),
@@ -49,9 +62,9 @@ export default function Home() {
         <h1 className="landing-title">SUMMIT</h1>
         <p className="landing-tag">
           Draft order. Chore duty. Who goes first. Give every name an Everest
-          expedition or an Olympic delegation, race them for anywhere from a
-          minute to eight hours, and let the ending decide — provably fair,
-          gloriously dramatic.
+          expedition, an Olympic delegation, or a Mars-bound crew; race them
+          for anywhere from a minute to a full day, and let the ending decide
+          — provably fair, gloriously dramatic.
         </p>
         <div className="landing-ctas">
           <Link className="cta" href="/new">
@@ -70,6 +83,13 @@ export default function Home() {
             disabled={busy !== null}
           >
             {busy === 'olympics' ? 'Preparing…' : '🏅 Olympics demo'}
+          </button>
+          <button
+            className="cta cta-ghost"
+            onClick={() => watchDemo('space')}
+            disabled={busy !== null}
+          >
+            {busy === 'space' ? 'Preparing…' : '🚀 Mars demo'}
           </button>
         </div>
       </div>

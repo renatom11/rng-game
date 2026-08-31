@@ -23,7 +23,7 @@ const DURATIONS: [string, number][] = [
 
 export default function NewRacePage() {
   const router = useRouter();
-  const [theme, setTheme] = useState<'everest' | 'olympics'>('everest');
+  const [theme, setTheme] = useState<'everest' | 'olympics' | 'space'>('everest');
   const [title, setTitle] = useState('');
   const [teams, setTeams] = useState<TeamRow[]>([
     { name: '', style: '' },
@@ -96,10 +96,10 @@ export default function NewRacePage() {
   return (
     <main className="form-shell">
       <p className="crumbs"><Link href="/">← Summit</Link></p>
-      <h1 className="race-title">Plan an expedition</h1>
+      <h1 className="race-title">Plan a race</h1>
       <p className="form-sub">
-        Every team has exactly equal odds — the mountain decides the order, and
-        nobody (including the site) can see the ending before it happens.
+        Every team has exactly equal odds — fate decides the order, and nobody
+        (including the site) can see the ending before it happens.
       </p>
 
       <div className="field">
@@ -127,11 +127,29 @@ export default function NewRacePage() {
               medal table, and a closing marquee that decides gold.
             </span>
           </button>
+          <button
+            className={`theme-card${theme === 'space' ? ' active' : ''}`}
+            onClick={() => setTheme('space')}
+            type="button"
+          >
+            <span className="theme-card-title">🚀 The Mars Run</span>
+            <span className="theme-card-desc">
+              Crews race across seventy-eight million kilometres: slingshots,
+              solar storms, resupply loops, and a powered-descent finale.
+              First on the red dirt wins.
+            </span>
+          </button>
         </div>
       </div>
 
       <label className="field">
-        <span>{theme === 'olympics' ? 'Games name' : 'Expedition name'}</span>
+        <span>
+          {theme === 'olympics'
+            ? 'Games name'
+            : theme === 'space'
+              ? 'Mission name'
+              : 'Expedition name'}
+        </span>
         <input
           value={title}
           onChange={(e) => setTitle(e.target.value)}
@@ -171,7 +189,9 @@ export default function NewRacePage() {
                 title="Style flavors the routes they take — it never changes their odds."
                 hidden={theme === 'olympics'}
               >
-                <option value="">Let the mountain decide</option>
+                <option value="">
+                  {theme === 'space' ? 'Let the void decide' : 'Let the mountain decide'}
+                </option>
                 <option value="bold">Bold</option>
                 <option value="balanced">Balanced</option>
                 <option value="cautious">Cautious</option>
@@ -194,10 +214,10 @@ export default function NewRacePage() {
         >
           + Add team
         </button>
-        {theme === 'everest' && (
+        {theme !== 'olympics' && (
           <p className="field-hint">
-            Style is pure flavor — bold squads take the risky lines, cautious
-            ones switchback. The odds stay exactly equal either way.
+            Style is pure flavor — bold teams take the risky lines, cautious
+            ones the safe ones. The odds stay exactly equal either way.
           </p>
         )}
       </div>
@@ -274,10 +294,14 @@ export default function NewRacePage() {
         {busy
           ? theme === 'olympics'
             ? 'Lighting the cauldron…'
-            : 'Consulting the mountain…'
+            : theme === 'space'
+              ? 'Fueling the boosters…'
+              : 'Consulting the mountain…'
           : theme === 'olympics'
             ? 'Open the Games'
-            : 'Create the expedition'}
+            : theme === 'space'
+              ? 'Launch the mission'
+              : 'Create the expedition'}
       </button>
     </main>
   );

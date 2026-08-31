@@ -1,8 +1,19 @@
 import type { CoreTimeline } from '@/engine/types';
 import type { RNG } from '@/engine/prng';
 import { randInt, weightedPick } from '@/engine/prng';
-import { NODES, SEGMENTS, type RouteEdge } from './route';
+import { NODES, SEGMENTS, type RouteEdge, type RouteSegment } from './route';
 import type { Style } from './types';
+
+/** Route shape for traversal detection, reusable by other journey themes. */
+export interface TraversalRoute {
+  segments: RouteSegment[];
+  fracById: Map<string, number>;
+}
+
+const EVEREST_TRAVERSAL_ROUTE: TraversalRoute = {
+  segments: SEGMENTS,
+  fracById: new Map(NODES.map((n) => [n.id, n.frac])),
+};
 
 /**
  * Narrative decoration: route choices, individual falls, team wipeouts.
@@ -55,15 +66,17 @@ export function buildTraversals(
   core: CoreTimeline,
   displayTrack: { tMs: number[]; pos: number[][] },
   styles: Style[],
+  route: TraversalRoute = EVEREST_TRAVERSAL_ROUTE,
 ): Traversal[] {
   const nTeams = displayTrack.pos.length;
+  const SEGS = route.segments;
   const out: Traversal[] = [];
   const moveThresh = Math.max(2, Math.round(nTeams / 6));
 
   for (let team = 0; team < nTeams; team++) {
     const row = displayTrack.pos[team];
-    for (let s = 0; s < SEGMENTS.length; s++) {
-      const fromFrac = NODES.find((n) => n.id === SEGMENTS[s].from)!.frac;
+    for (let s = 0; s < SEGS.length; s++) {
+      const fromFrac = route.fracById.get(SEGS[s].from)!;
       // Find each upward crossing of the segment start.
       for (let i = 1; i < row.length; i++) {
         if (!(row[i - 1] <= fromFrac + 1e-9 && row[i] > fromFrac + 1e-9)) continue;
@@ -77,7 +90,7 @@ export function buildTraversals(
           rankDelta = rankIn(after.order, team) - rankIn(before.order, team);
         }
 
-        const edges = SEGMENTS[s].edges;
+        const edges = SEGS[s].edges;
         let edge: RouteEdge;
         if (edges.length === 1) {
           edge = edges[0];

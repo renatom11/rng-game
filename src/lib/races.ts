@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import { getDb } from './db';
 import { deriveStatus, type RaceStatus } from './time';
 import {
-  toEverestSnapshot,
+  toJourneySnapshot,
   toOlympicsSnapshot,
   type PublicSnapshot,
 } from './slice';
@@ -10,6 +10,7 @@ import { generateEverest } from '@/themes/everest/generate';
 import type { EverestTimeline, Style } from '@/themes/everest/types';
 import { generateOlympics } from '@/themes/olympics/generate';
 import type { OlympicsTimeline } from '@/themes/olympics/types';
+import { generateSpace } from '@/themes/space/generate';
 
 /** Slug alphabet without lookalikes (no 0/O/1/l/i/u). */
 const SLUG_CHARS = 'abcdefghjkmnpqrstvwxyz23456789';
@@ -21,7 +22,7 @@ function newSlug(): string {
   return out;
 }
 
-export type Theme = 'everest' | 'olympics';
+export type Theme = 'everest' | 'olympics' | 'space';
 
 export interface CreateRaceInput {
   title?: string;
@@ -89,13 +90,17 @@ export function validateCreateInput(
   if (startAtMs > nowMs + 30 * 24 * 3_600_000) throw new ValidationError('start time is too far out');
 
   const theme: Theme = input.theme ?? 'everest';
-  if (theme !== 'everest' && theme !== 'olympics') {
-    throw new ValidationError('theme must be everest or olympics');
+  if (theme !== 'everest' && theme !== 'olympics' && theme !== 'space') {
+    throw new ValidationError('theme must be everest, olympics, or space');
   }
 
   const title =
     String(input.title ?? '').trim().slice(0, 80) ||
-    (theme === 'olympics' ? 'The Games' : 'The Expedition');
+    (theme === 'olympics'
+      ? 'The Games'
+      : theme === 'space'
+        ? 'The Mars Run'
+        : 'The Expedition');
 
   return {
     config: { title, theme, teams, demo },
@@ -113,7 +118,9 @@ export function createRace(
   const timeline =
     config.theme === 'olympics'
       ? generateOlympics(seed, { teams: config.teams, durationMs })
-      : generateEverest(seed, { teams: config.teams, durationMs });
+      : config.theme === 'space'
+        ? generateSpace(seed, { teams: config.teams, durationMs })
+        : generateEverest(seed, { teams: config.teams, durationMs });
   const slug = newSlug();
   getDb()
     .prepare(
@@ -184,7 +191,8 @@ export function getRaceView(
           elapsed,
           { complete, sinceMs: since },
         )
-      : toEverestSnapshot(
+      : toJourneySnapshot(
+          config.theme === 'space' ? 'space' : 'everest',
           JSON.parse(row.timeline_json) as EverestTimeline,
           elapsed,
           { complete, sinceMs: since },
