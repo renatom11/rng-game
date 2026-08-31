@@ -6,7 +6,7 @@ import { NODES, SEGMENTS, altitudeAt, nodeAtOrBelow, nodeById } from './route';
 import type { Climber, RaceEvent } from './types';
 import type { Cast } from './names';
 import type { FatePlan, Traversal } from './decorate';
-import { LineWriter } from './commentary/render';
+import { LineWriter } from '@/lib/linewriter';
 import {
   PHASE_NAMES,
   TEMPLATES,
@@ -380,9 +380,10 @@ export function buildEvents(input: BuildEventsInput): RaceEvent[] {
       ambient.push({ tMs, type: 'color', severity: 0, text: line('color', { camp: pick(rng, NODES).label, alt: pick(rng, [5364, 6065, 6400, 7160, 7950]) }) });
     }
   };
-  // Fill the largest gaps first until density target or no gap > maxGap.
+  // Fill the largest gaps first until BOTH the density target and the
+  // max-gap rule hold — stopping on count alone can leave silent stretches.
   let guard = 0;
-  while (ambient.length < targetAmbient && guard++ < 1000) {
+  while (ambient.length < targetAmbient * 2 && guard++ < 1200) {
     const all = [...events, ...ambient].sort((a, b) => a.tMs - b.tMs);
     let bigGapStart = -1;
     let bigGap = 0;

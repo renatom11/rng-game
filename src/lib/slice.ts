@@ -1,17 +1,24 @@
 import type { EverestTimeline, RaceEvent } from '@/themes/everest/types';
+import type {
+  OlympicsRaceEvent,
+  OlympicsTimeline,
+  PointsKeyframe,
+  ScheduledEvent,
+} from '@/themes/olympics/types';
 import type { Checkpoint } from '@/engine/types';
 
 /**
  * Spoiler-proof truncation. While a race is running, viewers receive only
  * what has already happened (plus a small lookahead so rendering stays
  * smooth between polls). Everything that would reveal the future — the
- * final order, summit times, future events/curves/checkpoints/wipeouts —
+ * final order, summit times, future events/curves/checkpoints/results —
  * never leaves the server. Demo races and finished races get everything.
  */
 
 export const LOOKAHEAD_MS = 60_000;
 
-export interface PublicSnapshot {
+export interface EverestSnapshot {
+  theme: 'everest';
   horizonMs: number;
   complete: boolean;
   climbers: EverestTimeline['climbers'];
@@ -31,6 +38,24 @@ export interface PublicSnapshot {
   summitTimesMs?: number[];
 }
 
+export interface OlympicsSnapshot {
+  theme: 'olympics';
+  horizonMs: number;
+  complete: boolean;
+  athletes: OlympicsTimeline['athletes'];
+  colors: string[];
+  pushStartMs: number;
+  /** Full schedule metadata is public — only results are spoilers. */
+  schedule: ScheduledEvent[];
+  pointsKeyframes: PointsKeyframe[];
+  live: { tMs: number[]; score: number[][] }[];
+  events: OlympicsRaceEvent[];
+  finalOrder?: number[];
+  finalRank?: number[];
+}
+
+export type PublicSnapshot = EverestSnapshot | OlympicsSnapshot;
+
 /** Index of the last entry in sorted `times` that is <= tMs (or -1). */
 function lastIndexAtOrBefore(times: number[], tMs: number): number {
   let lo = -1;
@@ -43,16 +68,17 @@ function lastIndexAtOrBefore(times: number[], tMs: number): number {
   return lo;
 }
 
-export function toPublicSnapshot(
+export function toEverestSnapshot(
   timeline: EverestTimeline,
   elapsedMs: number,
   opts: { complete: boolean },
-): PublicSnapshot {
+): EverestSnapshot {
   const { core } = timeline;
   const durationMs = core.grid.tMs[core.grid.tMs.length - 1];
 
   if (opts.complete) {
     return {
+      theme: 'everest',
       horizonMs: durationMs,
       complete: true,
       climbers: timeline.climbers,
@@ -73,11 +99,11 @@ export function toPublicSnapshot(
   }
 
   const horizonMs = Math.min(durationMs, Math.max(0, elapsedMs) + LOOKAHEAD_MS);
-
   const gi = lastIndexAtOrBefore(core.grid.tMs, horizonMs);
   const si = lastIndexAtOrBefore(timeline.displayTrack.tMs, horizonMs);
 
   return {
+    theme: 'everest',
     horizonMs,
     complete: false,
     climbers: timeline.climbers,
@@ -102,5 +128,52 @@ export function toPublicSnapshot(
       ),
     },
     wipeouts: timeline.wipeouts.filter((w) => w.tMs <= horizonMs),
+  };
+}
+
+export function toOlympicsSnapshot(
+  timeline: OlympicsTimeline,
+  elapsedMs: number,
+  opts: { complete: boolean },
+): OlympicsSnapshot {
+  const { core } = timeline;
+  const durationMs = core.grid.tMs[core.grid.tMs.length - 1];
+
+  if (opts.complete) {
+    return {
+      theme: 'olympics',
+      horizonMs: durationMs,
+      complete: true,
+      athletes: timeline.athletes,
+      colors: timeline.colors,
+      pushStartMs: core.pushStartMs,
+      schedule: timeline.schedule,
+      pointsKeyframes: timeline.pointsKeyframes,
+      live: timeline.live,
+      events: timeline.events,
+      finalOrder: core.finalOrder,
+      finalRank: core.finalRank,
+    };
+  }
+
+  const horizonMs = Math.min(durationMs, Math.max(0, elapsedMs) + LOOKAHEAD_MS);
+
+  return {
+    theme: 'olympics',
+    horizonMs,
+    complete: false,
+    athletes: timeline.athletes,
+    colors: timeline.colors,
+    pushStartMs: core.pushStartMs,
+    schedule: timeline.schedule,
+    pointsKeyframes: timeline.pointsKeyframes.filter((f) => f.tMs <= horizonMs),
+    live: timeline.live.map((lv) => {
+      const li = lastIndexAtOrBefore(lv.tMs, horizonMs);
+      return {
+        tMs: lv.tMs.slice(0, li + 1),
+        score: lv.score.map((row) => row.slice(0, li + 1)),
+      };
+    }),
+    events: timeline.events.filter((e) => e.tMs <= horizonMs),
   };
 }

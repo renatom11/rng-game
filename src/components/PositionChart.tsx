@@ -1,14 +1,14 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import type { PublicSnapshot } from '@/lib/slice';
-import { standingsAt, teamTags } from '@/lib/client/raceState';
+import { teamTags } from '@/lib/client/raceState';
 import { fmtClock } from './useRaceClock';
 
 /**
  * Rank-over-time bump chart. One 2px line per team in its identity color,
  * direct-labeled at the line end (the standings panel doubles as the full
  * legend). Single rank axis; hover crosshair with per-time tooltip.
+ * Theme-agnostic: the caller supplies orderAt(t).
  */
 
 const W = 720;
@@ -19,14 +19,15 @@ const PAD_T = 10;
 const PAD_B = 24;
 
 interface Props {
-  snap: PublicSnapshot;
+  orderAt: (tMs: number) => number[];
+  colors: string[];
   teamNames: string[];
   tMs: number;
   selected: number | null;
   onSelect: (i: number | null) => void;
 }
 
-export function PositionChart({ snap, teamNames, tMs, selected, onSelect }: Props) {
+export function PositionChart({ orderAt, colors, teamNames, tMs, selected, onSelect }: Props) {
   const n = teamNames.length;
   const [hoverX, setHoverX] = useState<number | null>(null);
   const tags = useMemo(() => teamTags(teamNames), [teamNames]);
@@ -38,12 +39,12 @@ export function PositionChart({ snap, teamNames, tMs, selected, onSelect }: Prop
     for (let i = 0; i <= count; i++) samples.push((upTo * i) / count);
     const series: number[][] = Array.from({ length: n }, () => []);
     for (const t of samples) {
-      const order = standingsAt(snap, n, t);
+      const order = orderAt(t);
       order.forEach((teamIdx, rank0) => series[teamIdx].push(rank0 + 1));
     }
     return { samples, series };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [snap, n, Math.floor(tMs / 5000)]);
+  }, [orderAt, n, Math.floor(tMs / 5000)]);
 
   const x = (i: number) => PAD_L + ((W - PAD_L - PAD_R) * i) / (samples.length - 1);
   const y = (rank: number) =>
@@ -74,7 +75,6 @@ export function PositionChart({ snap, teamNames, tMs, selected, onSelect }: Prop
         }}
         onPointerLeave={() => setHoverX(null)}
       >
-        {/* recessive rank grid */}
         {Array.from({ length: n }, (_, i) => (
           <g key={i}>
             <line
@@ -91,7 +91,6 @@ export function PositionChart({ snap, teamNames, tMs, selected, onSelect }: Prop
             </text>
           </g>
         ))}
-        {/* time ticks */}
         {[0, 0.5, 1].map((f) => (
           <text
             key={f}
@@ -112,7 +111,7 @@ export function PositionChart({ snap, teamNames, tMs, selected, onSelect }: Prop
               <polyline
                 points={pts}
                 fill="none"
-                stroke={snap.colors[teamIdx]}
+                stroke={colors[teamIdx]}
                 strokeWidth={selected === teamIdx ? 3 : 2}
                 strokeLinejoin="round"
                 onClick={() => onSelect(selected === teamIdx ? null : teamIdx)}
@@ -121,7 +120,7 @@ export function PositionChart({ snap, teamNames, tMs, selected, onSelect }: Prop
                 x={W - PAD_R + 6}
                 y={y(ranks[ranks.length - 1]) + 3.5}
                 className="chart-endlabel"
-                fill={snap.colors[teamIdx]}
+                fill={colors[teamIdx]}
                 onClick={() => onSelect(selected === teamIdx ? null : teamIdx)}
               >
                 {tags[teamIdx]}
@@ -152,7 +151,7 @@ export function PositionChart({ snap, teamNames, tMs, selected, onSelect }: Prop
             if (team < 0) return null;
             return (
               <span key={place} className="chart-tooltip-row">
-                <span className="feed-team-dot" style={{ background: snap.colors[team] }} />
+                <span className="feed-team-dot" style={{ background: colors[team] }} />
                 {place + 1}. {teamNames[team]}
               </span>
             );

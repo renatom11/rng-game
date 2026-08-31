@@ -567,6 +567,125 @@ button { font-family: inherit; }
   white-space: nowrap;
 }
 
+/* ---------- olympics ---------- */
+.oly-pane {
+  background: var(--bg-raised);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+}
+.oly-board { display: flex; flex-direction: column; gap: 0.8rem; flex: 1; }
+.oly-board-head { display: flex; align-items: baseline; gap: 0.7rem; flex-wrap: wrap; }
+.oly-live-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--danger);
+  animation: oly-pulse 1.6s ease-in-out infinite;
+  align-self: center;
+}
+@keyframes oly-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+.oly-event-name {
+  font-family: var(--font-display);
+  font-size: 1.35rem;
+  margin: 0;
+}
+.oly-marquee-badge {
+  background: var(--gold);
+  color: #14203a;
+  font-family: var(--font-body);
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  border-radius: 4px;
+  padding: 0.16rem 0.4rem;
+  margin-left: 0.6rem;
+  vertical-align: middle;
+}
+.oly-venue { color: var(--snow-dim); font-size: 0.85rem; }
+.oly-lanes { display: flex; flex-direction: column; gap: 0.45rem; }
+.oly-lane {
+  display: grid;
+  grid-template-columns: 1.4rem 1fr minmax(90px, 150px);
+  gap: 0.6rem;
+  align-items: center;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  padding: 0.3rem 0.4rem;
+  color: var(--snow);
+  cursor: pointer;
+  text-align: left;
+  transition: order 400ms;
+}
+.oly-lane:hover, .oly-lane.selected { background: var(--bg-panel); border-color: var(--line); }
+.oly-lane-rank { color: var(--snow-dim); font-variant-numeric: tabular-nums; font-size: 0.85rem; }
+.oly-lane-track {
+  position: relative;
+  height: 14px;
+  background: var(--bg-panel);
+  border-radius: 7px;
+  overflow: visible;
+}
+.oly-lane-fill {
+  display: block;
+  height: 100%;
+  border-radius: 7px;
+  opacity: 0.28;
+  transition: width 700ms linear;
+}
+.oly-lane-runner {
+  position: absolute;
+  top: -4px;
+  width: 26px;
+  height: 22px;
+  border-radius: 6px;
+  color: #0a1220;
+  font-size: 0.58rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: left 700ms linear;
+}
+.oly-lane-name {
+  font-size: 0.82rem;
+  color: var(--snow-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.oly-between { display: flex; align-items: center; justify-content: center; min-height: 180px; }
+.oly-between-line { color: var(--snow-dim); font-size: 1rem; text-align: center; }
+.oly-upnext { color: var(--snow-dim); font-size: 0.82rem; margin: 0.4rem 0 0; }
+.oly-points { font-variant-numeric: tabular-nums; font-weight: 600; text-align: right; }
+.oly-finale .oly-event-name { font-size: 1.7rem; }
+
+/* theme picker on the create form */
+.theme-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.7rem; }
+.theme-card {
+  background: var(--bg-panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 0.9rem;
+  color: var(--snow);
+  cursor: pointer;
+  text-align: left;
+  display: grid;
+  gap: 0.3rem;
+}
+.theme-card.active { border-color: var(--ice); box-shadow: 0 0 0 1px var(--ice); }
+.theme-card-title { font-weight: 700; }
+.theme-card-desc { font-size: 0.78rem; color: var(--snow-dim); line-height: 1.45; }
+@media (max-width: 560px) {
+  .theme-grid { grid-template-columns: 1fr; }
+}
+
 /* ---------- responsive ---------- */
 @media (max-width: 880px) {
   .race-grid, .is-finale .race-grid { grid-template-columns: 1fr; }

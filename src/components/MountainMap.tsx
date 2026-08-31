@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo } from 'react';
-import type { PublicSnapshot } from '@/lib/slice';
+import type { EverestSnapshot } from '@/lib/slice';
 import {
   displayPosAt,
   edgeChoicesAt,
@@ -28,7 +28,7 @@ const RISK_COLOR: Record<string, string> = {
 };
 
 interface Props {
-  snap: PublicSnapshot;
+  snap: EverestSnapshot;
   teamNames: string[];
   tMs: number;
   selected: number | null;

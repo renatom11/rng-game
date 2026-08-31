@@ -74,17 +74,23 @@ export function buildAnchors(
     if (!isFinal) {
       const spread = packSpread(u);
       const b = packCentroid(u);
-      // Dirichlet-ish gap shares across the field.
+      // Ladder of slot values across the field (Dirichlet-ish gaps), then
+      // assign each team INDEPENDENTLY: max(its slot, its own previous
+      // anchor). A shared cursor that also repaired against other teams'
+      // previous anchors compounds checkpoint over checkpoint and pins the
+      // whole field at the ceiling for hours in long races — don't bring
+      // that back. The cost is that p-ordering can lag the standings
+      // mid-race, which is invisible: displayed standings come from the
+      // checkpoint orders, not from p.
       const gaps = Array.from({ length: nTeams }, () => 0.25 + expRand(rng));
       const gapSum = gaps.reduce((a, g) => a + g, 0);
-      let cursor = Math.max(0, b - spread / 2);
+      const base = Math.max(0, b - spread / 2);
+      let acc = 0;
       for (let j = 0; j < nTeams; j++) {
         const team = worstToBest[j];
+        acc += (gaps[j] / gapSum) * spread;
         const prev = k === 0 ? 0 : anchors[team][k - 1];
-        cursor = Math.max(cursor + (gaps[j] / gapSum) * spread, prev);
-        const v = Math.min(cursor, MID_CEIL);
-        anchors[team].push(v);
-        cursor = v;
+        anchors[team].push(Math.min(Math.max(base + acc, prev), MID_CEIL));
       }
     } else {
       // South Col regroup: pack everyone in standings order into the thin

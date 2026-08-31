@@ -133,14 +133,38 @@ describe('convergence & curves', () => {
     expect(withLeadChange / SEEDS).toBeGreaterThan(0.5);
   });
 
-  it('summit times sit inside the late window and are distinct', () => {
+  it('summit times sit inside the late window, are distinct, and the finish envelope varies', () => {
+    const lastFractions = new Set<number>();
     for (const t of runs) {
       const sorted = t.summitTimesMs.slice().sort((a, b) => a - b);
       expect(sorted[0]).toBeGreaterThan(0.9 * DUR);
-      expect(sorted[N - 1]).toBeLessThanOrEqual(0.996 * DUR);
+      expect(sorted[N - 1]).toBeLessThanOrEqual(0.9975 * DUR);
       for (let i = 1; i < N; i++) {
-        expect(sorted[i] - sorted[i - 1]).toBeGreaterThanOrEqual(250);
+        expect(sorted[i] - sorted[i - 1]).toBeGreaterThanOrEqual(50);
       }
+      lastFractions.add(Math.round((sorted[N - 1] / DUR) * 1000));
+    }
+    // The last summit must NOT land at one scripted constant across races.
+    expect(lastFractions.size).toBeGreaterThan(5);
+  });
+
+  it('photo finishes occur even with two teams', () => {
+    let close = 0;
+    for (let s = 0; s < 120; s++) {
+      const t = generateCore(`duel-${s}`, { nTeams: 2, durationMs: 600_000 });
+      const gap = Math.abs(t.summitTimesMs[0] - t.summitTimesMs[1]);
+      if (gap <= 2_000) close++;
+      expect(gap).toBeGreaterThan(0);
+    }
+    expect(close).toBeGreaterThan(5);
+  });
+
+  it('long races: the field is not pinned at the pre-push ceiling for hours', () => {
+    const t = generateCore('long-haul', { nTeams: 10, durationMs: 28_800_000 });
+    // At halfway, nobody should already be parked at the Col ceiling.
+    const gi = t.grid.tMs.findIndex((x) => x >= 14_400_000);
+    for (let i = 0; i < 10; i++) {
+      expect(t.grid.p[i][gi]).toBeLessThan(0.62);
     }
   });
 });

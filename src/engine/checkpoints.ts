@@ -69,7 +69,10 @@ export function buildCheckpoints(
     for (let i = 0; i < nTeams; i++) {
       z[i] = RHO * z[i] + Math.sqrt(1 - RHO * RHO) * gauss(rng);
     }
-    const w = W_MIN + (W_MAX - W_MIN) * Math.min(1, u / PUSH_U);
+    // Taper the signal for tiny fields: at N=2 the untapered blend let the
+    // pre-push leader win ~70% of races, which reads as "decided early".
+    const taper = nTeams <= 2 ? 0.45 : nTeams === 3 ? 0.7 : 1;
+    const w = (W_MIN + (W_MAX - W_MIN) * Math.min(1, u / PUSH_U)) * taper;
     const score = z.map((zi, i) => (1 - w) * zi + w * target[i]);
     const order = score
       .map((s, i) => i)

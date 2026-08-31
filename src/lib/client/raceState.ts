@@ -1,4 +1,4 @@
-import type { PublicSnapshot } from '@/lib/slice';
+import type { EverestSnapshot } from '@/lib/slice';
 import type { ClimberStatus, RaceEvent } from '@/themes/everest/types';
 import { METER_KEYS } from '@/themes/everest/types';
 
@@ -27,7 +27,7 @@ export function interpAt(times: number[], values: number[], tMs: number): number
 
 /** Display position along the route for a team at time t. */
 export function displayPosAt(
-  snap: PublicSnapshot,
+  snap: EverestSnapshot,
   teamIdx: number,
   tMs: number,
 ): number {
@@ -36,7 +36,7 @@ export function displayPosAt(
 
 /** Engine progress for a team at time t (drives push-phase ranking). */
 export function progressAt(
-  snap: PublicSnapshot,
+  snap: EverestSnapshot,
   teamIdx: number,
   tMs: number,
 ): number {
@@ -44,7 +44,7 @@ export function progressAt(
 }
 
 export function metersAt(
-  snap: PublicSnapshot,
+  snap: EverestSnapshot,
   teamIdx: number,
   tMs: number,
 ): Record<(typeof METER_KEYS)[number], number> {
@@ -57,7 +57,7 @@ export function metersAt(
   return out;
 }
 
-export function eventsUpTo(snap: PublicSnapshot, tMs: number): RaceEvent[] {
+export function eventsUpTo(snap: EverestSnapshot, tMs: number): RaceEvent[] {
   // events are sorted by tMs at generation time
   const out: RaceEvent[] = [];
   for (const e of snap.events) {
@@ -69,7 +69,7 @@ export function eventsUpTo(snap: PublicSnapshot, tMs: number): RaceEvent[] {
 
 /** Latest standings order at time t: checkpoints pre-push, live p in the push. */
 export function standingsAt(
-  snap: PublicSnapshot,
+  snap: EverestSnapshot,
   nTeams: number,
   tMs: number,
 ): number[] {
@@ -91,7 +91,7 @@ export function standingsAt(
 }
 
 /** Teams that have summited by t, in arrival order (from delivered events). */
-export function summitedOrder(snap: PublicSnapshot, tMs: number): number[] {
+export function summitedOrder(snap: EverestSnapshot, tMs: number): number[] {
   const out: number[] = [];
   for (const e of snap.events) {
     if (e.tMs > tMs) break;
@@ -102,7 +102,7 @@ export function summitedOrder(snap: PublicSnapshot, tMs: number): number[] {
 
 /** Standings a short while ago, for momentum arrows. */
 export function momentum(
-  snap: PublicSnapshot,
+  snap: EverestSnapshot,
   nTeams: number,
   tMs: number,
   windowMs: number,
@@ -125,7 +125,7 @@ export interface TeamLiveState {
 
 /** Fold events up to t into per-team live state (activity, roster, edge). */
 export function teamStatesAt(
-  snap: PublicSnapshot,
+  snap: EverestSnapshot,
   nTeams: number,
   tMs: number,
 ): TeamLiveState[] {
@@ -167,7 +167,7 @@ export function teamStatesAt(
 
 /** Per-team, per-segment edge choices from delivered fork_choice events. */
 export function edgeChoicesAt(
-  snap: PublicSnapshot,
+  snap: EverestSnapshot,
   nTeams: number,
   tMs: number,
   segIdxByEdgeId: Map<string, number>,

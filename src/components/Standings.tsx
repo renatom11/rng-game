@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo } from 'react';
-import type { PublicSnapshot } from '@/lib/slice';
+import type { EverestSnapshot } from '@/lib/slice';
 import {
   displayPosAt,
   metersAt,
@@ -22,7 +22,7 @@ const STATUS_ICON: Record<ClimberStatus, { chip: string; label: string }> = {
 };
 
 interface Props {
-  snap: PublicSnapshot;
+  snap: EverestSnapshot;
   teamNames: string[];
   tMs: number;
   durationMs: number;
@@ -123,7 +123,7 @@ function TeamCard({
   climberStatus,
   wiped,
 }: {
-  snap: PublicSnapshot;
+  snap: EverestSnapshot;
   teamIdx: number;
   tMs: number;
   climberStatus: ClimberStatus[];

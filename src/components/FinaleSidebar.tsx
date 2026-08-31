@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo } from 'react';
-import type { PublicSnapshot } from '@/lib/slice';
+import type { EverestSnapshot } from '@/lib/slice';
 import {
   displayPosAt,
   eventsUpTo,
@@ -12,7 +12,7 @@ import {
 import { altitudeAt } from '@/themes/everest/route';
 
 interface Props {
-  snap: PublicSnapshot;
+  snap: EverestSnapshot;
   teamNames: string[];
   tMs: number;
 }

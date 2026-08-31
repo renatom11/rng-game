@@ -1,9 +1,15 @@
 import crypto from 'node:crypto';
 import { getDb } from './db';
 import { deriveStatus, type RaceStatus } from './time';
-import { toPublicSnapshot, type PublicSnapshot } from './slice';
+import {
+  toEverestSnapshot,
+  toOlympicsSnapshot,
+  type PublicSnapshot,
+} from './slice';
 import { generateEverest } from '@/themes/everest/generate';
 import type { EverestTimeline, Style } from '@/themes/everest/types';
+import { generateOlympics } from '@/themes/olympics/generate';
+import type { OlympicsTimeline } from '@/themes/olympics/types';
 
 /** Slug alphabet without lookalikes (no 0/O/1/l/i/u). */
 const SLUG_CHARS = 'abcdefghjkmnpqrstvwxyz23456789';
@@ -15,9 +21,11 @@ function newSlug(): string {
   return out;
 }
 
+export type Theme = 'everest' | 'olympics';
+
 export interface CreateRaceInput {
   title?: string;
-  theme?: 'everest';
+  theme?: Theme;
   teams: { name: string; color?: string; style?: Style }[];
   durationMs: number;
   startAtMs?: number;
@@ -26,7 +34,7 @@ export interface CreateRaceInput {
 
 export interface RaceConfigStored {
   title: string;
-  theme: 'everest';
+  theme: Theme;
   teams: { name: string; color?: string; style?: Style }[];
   demo: boolean;
 }
@@ -80,10 +88,17 @@ export function validateCreateInput(
   if (startAtMs < nowMs - 5_000) throw new ValidationError('start time is in the past');
   if (startAtMs > nowMs + 30 * 24 * 3_600_000) throw new ValidationError('start time is too far out');
 
-  const title = String(input.title ?? '').trim().slice(0, 80) || 'The Expedition';
+  const theme: Theme = input.theme ?? 'everest';
+  if (theme !== 'everest' && theme !== 'olympics') {
+    throw new ValidationError('theme must be everest or olympics');
+  }
+
+  const title =
+    String(input.title ?? '').trim().slice(0, 80) ||
+    (theme === 'olympics' ? 'The Games' : 'The Expedition');
 
   return {
-    config: { title, theme: 'everest', teams, demo },
+    config: { title, theme, teams, demo },
     durationMs,
     startAtMs,
   };
@@ -95,10 +110,10 @@ export function createRace(
 ): { slug: string } {
   const { config, durationMs, startAtMs } = validateCreateInput(input, nowMs);
   const seed = crypto.randomBytes(16).toString('hex');
-  const timeline = generateEverest(seed, {
-    teams: config.teams,
-    durationMs,
-  });
+  const timeline =
+    config.theme === 'olympics'
+      ? generateOlympics(seed, { teams: config.teams, durationMs })
+      : generateEverest(seed, { teams: config.teams, durationMs });
   const slug = newSlug();
   getDb()
     .prepare(
@@ -144,16 +159,22 @@ export function getRaceView(slug: string, nowMs: number): RaceView | null {
   if (!row) return null;
 
   const config = JSON.parse(row.config_json) as RaceConfigStored;
-  const timeline = JSON.parse(row.timeline_json) as EverestTimeline;
   const status = deriveStatus(nowMs, row.start_at, row.duration_ms);
-  const elapsed = nowMs - row.start_at;
+  const elapsed = status === 'scheduled' ? 0 : nowMs - row.start_at;
   const complete = config.demo || status === 'finished';
 
-  const snapshot = toPublicSnapshot(
-    timeline,
-    status === 'scheduled' ? 0 : elapsed,
-    { complete },
-  );
+  const snapshot: PublicSnapshot =
+    config.theme === 'olympics'
+      ? toOlympicsSnapshot(
+          JSON.parse(row.timeline_json) as OlympicsTimeline,
+          elapsed,
+          { complete },
+        )
+      : toEverestSnapshot(
+          JSON.parse(row.timeline_json) as EverestTimeline,
+          elapsed,
+          { complete },
+        );
 
   return {
     slug: row.id,

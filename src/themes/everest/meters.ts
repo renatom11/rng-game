@@ -131,6 +131,18 @@ function clamp(x: number): number {
 /** readiness = weighted blend; call again after event nudges. */
 export function recomputeReadiness(values: number[][][]): void {
   for (const rows of values) {
+    // Event nudges can stack (a fall + a route punishment in the same sparse
+    // step); smooth every meter so no keyframe-to-keyframe jump exceeds 24
+    // points — bars should slide, not snap.
+    for (let m = 0; m < rows.length; m++) {
+      if (m === READY) continue;
+      const row = rows[m];
+      for (let i = 1; i < row.length; i++) {
+        const d = row[i] - row[i - 1];
+        if (d > 24) row[i] = row[i - 1] + 24;
+        else if (d < -24) row[i] = row[i - 1] - 24;
+      }
+    }
     for (let i = 0; i < rows[O2].length; i++) {
       rows[READY][i] = Math.round(
         clamp(

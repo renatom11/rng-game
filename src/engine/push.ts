@@ -35,32 +35,34 @@ export function buildPushPlan(
   const rng = forkRng(seedHex, 'summit');
   const pushStartMs = Math.round(PUSH_U * durationMs);
 
-  // Summit window: starts ~93% (jittered), ends 99.5%.
+  // Summit window: both ends jittered — a fixed endpoint would make every
+  // race finish at the same predictable instant (last summit was always
+  // exactly 0.995 × duration before this).
   const windowStart =
     Math.round((0.93 + (rng() * 2 - 1) * 0.01) * durationMs);
-  const windowEnd = Math.round(0.995 * durationMs);
+  const windowEnd = Math.round((0.984 + rng() * 0.0115) * durationMs);
+  const span = Math.max(1, windowEnd - windowStart);
+  const minGap = Math.max(250, Math.min(300, span / (2 * Math.max(1, nTeams))));
 
-  // Gaps between consecutive summits; occasional photo-finish squeezes.
-  const gaps: number[] = [];
-  for (let i = 0; i < nTeams - 1; i++) {
-    let g = 0.4 + expRand(rng);
-    if (rng() < 0.25) g = 0.1; // photo finish
-    gaps.push(g);
-  }
-  const gapSum = gaps.reduce((a, g) => a + g, 0) || 1;
-  const span = windowEnd - windowStart;
-  const minGap = Math.max(300, 0.003 * durationMs);
-
+  // ABSOLUTE gaps (never normalized to fill the window exactly): the trail
+  // length varies race to race, and a squeeze produces a real photo finish
+  // at any field size — including N=2, where normalization used to cancel
+  // the squeeze entirely.
+  const scale =
+    (span / Math.max(2, nTeams - 1)) * (0.5 + rng() * 0.45);
   const times: number[] = [windowStart];
-  for (let i = 0; i < gaps.length; i++) {
-    times.push(times[i] + Math.max(minGap, (gaps[i] / gapSum) * span));
+  for (let i = 0; i < nTeams - 1; i++) {
+    let g = scale * (0.35 + expRand(rng) * 0.65);
+    if (rng() < 0.25) g = 0; // photo finish (clamped up to minGap below)
+    times.push(times[i] + Math.max(minGap, g));
   }
-  // If minGap enforcement overshot the window, compress back inside it.
+  // If the draws overshot the window, compress back inside it (gap ratios
+  // survive, so squeezes stay squeezed and long trails stay long).
   const overshoot = times[times.length - 1] - windowEnd;
   if (overshoot > 0) {
-    const scale = (windowEnd - windowStart) / (times[times.length - 1] - windowStart);
+    const f = span / (times[times.length - 1] - windowStart);
     for (let i = 1; i < times.length; i++) {
-      times[i] = windowStart + (times[i] - windowStart) * scale;
+      times[i] = windowStart + (times[i] - windowStart) * f;
     }
   }
 

@@ -15,7 +15,7 @@ export function prePushKeyframes(
   anchorSet: AnchorSet,
 ): { tMs: number[]; p: number[] }[] {
   const rng = forkRng(seedHex, 'pre-push-texture');
-  const subSpacing = Math.max(1000, durationMs / 600);
+  const subSpacing = Math.max(800, durationMs / 600);
   const out: { tMs: number[]; p: number[] }[] = [];
 
   for (let team = 0; team < nTeams; team++) {
@@ -27,7 +27,7 @@ export function prePushKeyframes(
       const t1 = checkpoints[k].tMs;
       const p1 = anchorSet.anchors[team][k];
       const segSpan = t1 - prevT;
-      const m = Math.max(1, Math.min(30, Math.floor(segSpan / subSpacing)));
+      const m = Math.max(1, Math.min(40, Math.floor(segSpan / subSpacing)));
       if (m > 1 && p1 > prevP) {
         // Noisy increments: exp draws, a quarter of them zeroed (plateaus).
         const incs: number[] = [];
@@ -35,7 +35,7 @@ export function prePushKeyframes(
         for (let j = 0; j < m; j++) {
           // Clamp so a single sub-interval can't swallow an outsized share
           // of a big anchor delta (reads as teleporting on the map).
-          const inc = rng() < 0.25 ? 0 : Math.min(2.5, expRand(rng));
+          const inc = rng() < 0.25 ? 0 : Math.min(2.2, expRand(rng));
           incs.push(inc);
           sum += inc;
         }

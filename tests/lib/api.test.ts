@@ -59,6 +59,7 @@ describe('race storage & spoiler-proof serving', () => {
     const view = getRaceView(slug, midNow)!;
     expect(view.status).toBe('running');
     const snap = view.snapshot;
+    if (snap.theme !== 'everest') throw new Error('expected everest snapshot');
     const horizon = snap.horizonMs;
     expect(horizon).toBe(300_000 + LOOKAHEAD_MS);
 
@@ -90,6 +91,7 @@ describe('race storage & spoiler-proof serving', () => {
     expect(view.status).toBe('finished');
     expect(view.snapshot.complete).toBe(true);
     expect(view.snapshot.finalOrder).toHaveLength(5);
+    if (view.snapshot.theme !== 'everest') throw new Error('expected everest');
     expect(view.snapshot.summitTimesMs).toHaveLength(5);
     const lastEvent = view.snapshot.events[view.snapshot.events.length - 1];
     expect(lastEvent.type).toBe('race_finish');
@@ -118,6 +120,7 @@ describe('race storage & spoiler-proof serving', () => {
     let prevEvents = -1;
     for (const dt of [30_000, 90_000, 150_000, 240_000]) {
       const v = getRaceView(slug, NOW + dt)!;
+      if (v.snapshot.theme !== 'everest') throw new Error('expected everest');
       expect(v.snapshot.events.length).toBeGreaterThanOrEqual(prevEvents);
       prevEvents = v.snapshot.events.length;
       expect(v.snapshot.meters.values[0][0].length).toBe(v.snapshot.meters.tMs.length);

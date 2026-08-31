@@ -45,10 +45,24 @@ export interface CoreTimeline {
   };
 }
 
-/** Rank teams by progress at a grid index: returns team indices, leader first. */
-export function rankAtGridIndex(grid: CoreTimeline['grid'], i: number): number[] {
+/**
+ * Rank teams by progress at a grid index: returns team indices, leader
+ * first. Teams that have finished (p = 1) tie on progress, so pass
+ * summitTimesMs to rank them by arrival — without it, finished teams would
+ * collapse to team-index order and contradict the real result.
+ */
+export function rankAtGridIndex(
+  grid: CoreTimeline['grid'],
+  i: number,
+  summitTimesMs?: number[],
+): number[] {
   const idx = grid.p.map((_, team) => team);
-  idx.sort((a, b) => grid.p[b][i] - grid.p[a][i] || a - b);
+  idx.sort((a, b) => {
+    const d = grid.p[b][i] - grid.p[a][i];
+    if (d !== 0) return d;
+    if (summitTimesMs) return summitTimesMs[a] - summitTimesMs[b];
+    return a - b;
+  });
   return idx;
 }
 
