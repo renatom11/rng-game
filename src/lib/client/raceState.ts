@@ -1,7 +1,7 @@
-import type { EverestSnapshot } from '@/lib/slice';
+import type { JourneySnapshot } from '@/lib/slice';
 import type { ClimberStatus, RaceEvent } from '@/themes/everest/types';
 import { METER_KEYS } from '@/themes/everest/types';
-import { nodeAtOrBelow } from '@/themes/everest/route';
+import { EVEREST_JOURNEY, type JourneyTheme } from './journeyTheme';
 
 /**
  * Pure client-side race-state derivation: everything a component needs at
@@ -28,7 +28,7 @@ export function interpAt(times: number[], values: number[], tMs: number): number
 
 /** Display position along the route for a team at time t. */
 export function displayPosAt(
-  snap: EverestSnapshot,
+  snap: JourneySnapshot,
   teamIdx: number,
   tMs: number,
 ): number {
@@ -37,7 +37,7 @@ export function displayPosAt(
 
 /** Engine progress for a team at time t (drives push-phase ranking). */
 export function progressAt(
-  snap: EverestSnapshot,
+  snap: JourneySnapshot,
   teamIdx: number,
   tMs: number,
 ): number {
@@ -45,7 +45,7 @@ export function progressAt(
 }
 
 export function metersAt(
-  snap: EverestSnapshot,
+  snap: JourneySnapshot,
   teamIdx: number,
   tMs: number,
 ): Record<(typeof METER_KEYS)[number], number> {
@@ -58,7 +58,7 @@ export function metersAt(
   return out;
 }
 
-export function eventsUpTo(snap: EverestSnapshot, tMs: number): RaceEvent[] {
+export function eventsUpTo(snap: JourneySnapshot, tMs: number): RaceEvent[] {
   // events are sorted by tMs at generation time
   const out: RaceEvent[] = [];
   for (const e of snap.events) {
@@ -70,7 +70,7 @@ export function eventsUpTo(snap: EverestSnapshot, tMs: number): RaceEvent[] {
 
 /** Latest standings order at time t: checkpoints pre-push, live p in the push. */
 export function standingsAt(
-  snap: EverestSnapshot,
+  snap: JourneySnapshot,
   nTeams: number,
   tMs: number,
 ): number[] {
@@ -106,7 +106,7 @@ export function standingsAt(
 }
 
 /** Teams that have summited by t, in arrival order (from delivered events). */
-export function summitedOrder(snap: EverestSnapshot, tMs: number): number[] {
+export function summitedOrder(snap: JourneySnapshot, tMs: number): number[] {
   const out: number[] = [];
   for (const e of snap.events) {
     if (e.tMs > tMs) break;
@@ -117,7 +117,7 @@ export function summitedOrder(snap: EverestSnapshot, tMs: number): number[] {
 
 /** Standings a short while ago, for momentum arrows. */
 export function momentum(
-  snap: EverestSnapshot,
+  snap: JourneySnapshot,
   nTeams: number,
   tMs: number,
   windowMs: number,
@@ -146,12 +146,13 @@ export interface TeamLiveState {
 
 /** Fold events up to t into per-team live state (activity, roster, edge). */
 export function teamStatesAt(
-  snap: EverestSnapshot,
+  snap: JourneySnapshot,
   nTeams: number,
   tMs: number,
+  jt: JourneyTheme = EVEREST_JOURNEY,
 ): TeamLiveState[] {
   const states: TeamLiveState[] = Array.from({ length: nTeams }, (_, i) => ({
-    activity: 'Preparing at Base Camp',
+    activity: jt.motion.preparing,
     edgeId: null,
     wiped: false,
     climberStatus: snap.climbers[i].map(() => 'climbing' as ClimberStatus),
@@ -185,7 +186,7 @@ export function teamStatesAt(
         c === 'turned-back' ? c : 'fallen',
       );
     }
-    if (e.type === 'summit') s.activity = 'Summited';
+    if (e.type === 'summit') s.activity = jt.finishedActivity;
   }
 
   // Motion-aware activity: event-carried labels go stale between throttled
@@ -198,7 +199,7 @@ export function teamStatesAt(
   const lookback = dtStep * 1.6;
   for (let i = 0; i < nTeams; i++) {
     const s = states[i];
-    if (s.wiped || s.activity === 'Summited') continue;
+    if (s.wiped || s.activity === jt.finishedActivity) continue;
     if (snap.displayTrack.tMs.length < 2 || tMs < lookback) continue;
     const pos = interpAt(snap.displayTrack.tMs, snap.displayTrack.pos[i], tMs);
     const prev = interpAt(
@@ -209,16 +210,16 @@ export function teamStatesAt(
     const d = pos - prev;
     const thresh = 0.0012;
     if (d > thresh) {
-      // keep a route label if one is current, else generic climbing
-      if (!s.activity.startsWith('On ')) s.activity = 'Climbing';
+      // keep a route label if one is current, else the generic moving verb
+      if (!s.activity.startsWith('On ')) s.activity = jt.motion.up;
     } else if (d < -thresh) {
-      s.activity = 'Descending to rest';
+      s.activity = jt.motion.down;
     } else {
-      const camp = nodeAtOrBelow(pos + 0.015);
+      const wp = jt.waypointAt(pos + 0.015);
       s.activity =
-        Math.abs(camp.frac - pos) < 0.02
-          ? `Resting at ${camp.label}`
-          : 'Holding position';
+        Math.abs(wp.frac - pos) < 0.02
+          ? jt.motion.restingAt(wp.label)
+          : jt.motion.holding;
     }
   }
   return states;
@@ -226,7 +227,7 @@ export function teamStatesAt(
 
 /** Per-team, per-segment edge choices from delivered fork_choice events. */
 export function edgeChoicesAt(
-  snap: EverestSnapshot,
+  snap: JourneySnapshot,
   nTeams: number,
   tMs: number,
   segIdxByEdgeId: Map<string, number>,

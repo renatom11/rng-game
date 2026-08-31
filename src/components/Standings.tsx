@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo } from 'react';
-import type { EverestSnapshot } from '@/lib/slice';
+import type { JourneySnapshot } from '@/lib/slice';
 import {
   displayPosAt,
   metersAt,
@@ -10,19 +10,20 @@ import {
   teamStatesAt,
   teamTags,
 } from '@/lib/client/raceState';
-import { nodeAtOrBelow, altitudeAt } from '@/themes/everest/route';
 import type { ClimberStatus } from '@/themes/everest/types';
+import type { JourneyTheme } from '@/lib/client/journeyTheme';
 
-const STATUS_ICON: Record<ClimberStatus, { chip: string; label: string }> = {
-  climbing: { chip: 'ok', label: 'climbing' },
-  resting: { chip: 'ok', label: 'resting' },
-  injured: { chip: 'warn', label: 'injured' },
-  'turned-back': { chip: 'dim', label: 'turned back' },
-  fallen: { chip: 'bad', label: 'fallen' },
+const STATUS_CHIP: Record<ClimberStatus, string> = {
+  climbing: 'ok',
+  resting: 'ok',
+  injured: 'warn',
+  'turned-back': 'dim',
+  fallen: 'bad',
 };
 
 interface Props {
-  snap: EverestSnapshot;
+  snap: JourneySnapshot;
+  jt: JourneyTheme;
   teamNames: string[];
   tMs: number;
   durationMs: number;
@@ -30,7 +31,7 @@ interface Props {
   onSelect: (i: number | null) => void;
 }
 
-export function Standings({ snap, teamNames, tMs, durationMs, selected, onSelect }: Props) {
+export function Standings({ snap, jt, teamNames, tMs, durationMs, selected, onSelect }: Props) {
   const n = teamNames.length;
   const tick = Math.floor(tMs / 2000);
 
@@ -40,9 +41,9 @@ export function Standings({ snap, teamNames, tMs, durationMs, selected, onSelect
     [snap, n, tick],
   );
   const states = useMemo(
-    () => teamStatesAt(snap, n, tMs),
+    () => teamStatesAt(snap, n, tMs, jt),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [snap, n, tick],
+    [snap, n, tick, jt],
   );
   const mom = useMemo(
     () => momentum(snap, n, tMs, Math.max(120_000, durationMs / 15)),
@@ -53,21 +54,21 @@ export function Standings({ snap, teamNames, tMs, durationMs, selected, onSelect
 
   return (
     <div className="standings">
-      <h2 className="panel-title">Expedition standings</h2>
+      <h2 className="panel-title">{jt.standingsTitle}</h2>
       <ol className="standings-list">
         {order.map((teamIdx, i) => {
           const st = states[teamIdx];
           const m = metersAt(snap, teamIdx, tMs);
           const pos = displayPosAt(snap, teamIdx, tMs);
-          const camp = nodeAtOrBelow(pos + 0.01);
-          const nearCamp = Math.abs(camp.frac - pos) < 0.02;
+          const wp = jt.waypointAt(pos + 0.01);
+          const nearWp = Math.abs(wp.frac - pos) < 0.02;
           const where = st.wiped
-            ? 'Lost on the mountain'
-            : st.activity === 'Summited'
-              ? 'Summit'
-              : nearCamp
-                ? camp.label
-                : `${altitudeAt(pos).toLocaleString()} m`;
+            ? jt.lostWhere
+            : st.activity === jt.finishedActivity
+              ? jt.finishedWhere
+              : nearWp
+                ? wp.label
+                : jt.positionLabel(pos);
           const isSel = selected === teamIdx;
           const arrow = mom[teamIdx] > 0 ? '▲' : mom[teamIdx] < 0 ? '▼' : '·';
           return (
@@ -102,6 +103,7 @@ export function Standings({ snap, teamNames, tMs, durationMs, selected, onSelect
               {isSel && (
                 <TeamCard
                   snap={snap}
+                  jt={jt}
                   teamIdx={teamIdx}
                   tMs={tMs}
                   climberStatus={st.climberStatus}
@@ -118,12 +120,14 @@ export function Standings({ snap, teamNames, tMs, durationMs, selected, onSelect
 
 function TeamCard({
   snap,
+  jt,
   teamIdx,
   tMs,
   climberStatus,
   wiped,
 }: {
-  snap: EverestSnapshot;
+  snap: JourneySnapshot;
+  jt: JourneyTheme;
   teamIdx: number;
   tMs: number;
   climberStatus: ClimberStatus[];
@@ -131,33 +135,31 @@ function TeamCard({
 }) {
   const m = metersAt(snap, teamIdx, tMs);
   const squad = snap.climbers[teamIdx];
+  const [l1, l2, l3, l4, l5, l6, l7] = jt.meterLabels;
   const bars: [string, number][] = [
-    ['Oxygen', m.o2],
-    ['Food & fuel', m.food],
-    ['Rope', m.rope],
-    ['Medical', m.med],
-    ['Energy', m.energy],
-    ['Morale', m.morale],
-    ['Acclimatization', m.accl],
+    [l1, m.o2],
+    [l2, m.food],
+    [l3, m.rope],
+    [l4, m.med],
+    [l5, m.energy],
+    [l6, m.morale],
+    [l7, m.accl],
   ];
   return (
     <div className="team-card">
-      {wiped && <div className="team-card-wiped">The mountain keeps them. Expedition over.</div>}
+      {wiped && <div className="team-card-wiped">{jt.wipedCard}</div>}
       <div className="team-card-cols">
         <div>
-          <h3>Squad · {snap.styles[teamIdx]}</h3>
+          <h3>{jt.squadTitle} · {snap.styles[teamIdx]}</h3>
           <ul className="roster">
-            {squad.map((c, ci) => {
-              const s = STATUS_ICON[climberStatus[ci]];
-              return (
-                <li key={ci} className={`roster-row chip-${s.chip}`}>
-                  <span className="roster-dot" aria-hidden />
-                  <span className="roster-name">{c.name}</span>
-                  <span className="roster-role">{c.role}</span>
-                  <span className="roster-status">{s.label}</span>
-                </li>
-              );
-            })}
+            {squad.map((c, ci) => (
+              <li key={ci} className={`roster-row chip-${STATUS_CHIP[climberStatus[ci]]}`}>
+                <span className="roster-dot" aria-hidden />
+                <span className="roster-name">{c.name}</span>
+                <span className="roster-role">{c.role}</span>
+                <span className="roster-status">{jt.statusLabels[climberStatus[ci]]}</span>
+              </li>
+            ))}
           </ul>
         </div>
         <div>
@@ -177,7 +179,7 @@ function TeamCard({
             ))}
           </ul>
           <div className="readiness-line">
-            Readiness for next push: <strong>{m.readiness}%</strong>
+            {jt.readinessLabel}: <strong>{m.readiness}%</strong>
           </div>
         </div>
       </div>

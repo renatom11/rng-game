@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo } from 'react';
-import type { EverestSnapshot } from '@/lib/slice';
+import type { JourneySnapshot } from '@/lib/slice';
 import {
   displayPosAt,
   eventsUpTo,
@@ -9,16 +9,17 @@ import {
   summitedOrder,
   teamStatesAt,
 } from '@/lib/client/raceState';
-import { altitudeAt } from '@/themes/everest/route';
+import type { JourneyTheme } from '@/lib/client/journeyTheme';
 
 interface Props {
-  snap: EverestSnapshot;
+  snap: JourneySnapshot;
+  jt: JourneyTheme;
   teamNames: string[];
   tMs: number;
 }
 
-/** The live summit-push board: order, altitudes, arrivals, latest headline. */
-export function FinaleSidebar({ snap, teamNames, tMs }: Props) {
+/** The live final-act board: order, positions, arrivals, latest headline. */
+export function FinaleSidebar({ snap, jt, teamNames, tMs }: Props) {
   const n = teamNames.length;
   const tick = Math.floor(tMs / 1000);
 
@@ -33,9 +34,9 @@ export function FinaleSidebar({ snap, teamNames, tMs }: Props) {
     [snap, tick],
   );
   const states = useMemo(
-    () => teamStatesAt(snap, n, tMs),
+    () => teamStatesAt(snap, n, tMs, jt),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [snap, n, tick],
+    [snap, n, tick, jt],
   );
   const headline = useMemo(() => {
     const evs = eventsUpTo(snap, tMs);
@@ -48,15 +49,12 @@ export function FinaleSidebar({ snap, teamNames, tMs }: Props) {
 
   return (
     <div className="finale-board">
-      <h2 className="finale-title">SUMMIT PUSH</h2>
+      <h2 className="finale-title">{jt.finaleTitle}</h2>
       {headline && <p className="finale-headline">{headline.text}</p>}
       <ol className="finale-list">
         {order.map((teamIdx, i) => {
           const isUp = summited.has(teamIdx);
           const wiped = states[teamIdx].wiped;
-          const alt = isUp
-            ? 8849
-            : altitudeAt(displayPosAt(snap, teamIdx, tMs));
           return (
             <li
               key={teamIdx}
@@ -66,7 +64,11 @@ export function FinaleSidebar({ snap, teamNames, tMs }: Props) {
               <span className="feed-team-dot" style={{ background: snap.colors[teamIdx] }} />
               <span className="finale-name">{teamNames[teamIdx]}</span>
               <span className="finale-alt">
-                {wiped ? 'lost' : `${alt.toLocaleString()} m`}
+                {wiped
+                  ? jt.lostShort
+                  : isUp
+                    ? jt.positionLabel(1)
+                    : jt.positionLabel(displayPosAt(snap, teamIdx, tMs))}
               </span>
             </li>
           );

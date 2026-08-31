@@ -2,10 +2,17 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import type { EverestSnapshot, OlympicsSnapshot } from '@/lib/slice';
-import { phaseAt, standingsAt } from '@/lib/client/raceState';
+import type {
+  EverestSnapshot,
+  JourneySnapshot,
+  OlympicsSnapshot,
+  SpaceSnapshot,
+} from '@/lib/slice';
+
+type AnyJourneySnapshot = EverestSnapshot | SpaceSnapshot;
+import { standingsAt } from '@/lib/client/raceState';
+import { EVEREST_JOURNEY, type JourneyTheme } from '@/lib/client/journeyTheme';
 import { olyPhaseLabel, olyStandingsAt } from '@/lib/client/olympicsState';
-import { PHASE_NAMES } from '@/themes/everest/commentary/templates';
 import { useRaceData } from './useRaceData';
 import { useRaceClock } from './useRaceClock';
 import { MountainMap } from './MountainMap';
@@ -112,6 +119,7 @@ export function RaceClient({ slug }: { slug: string }) {
         ) : (
           <ResultsRecap
             snap={snap}
+            jt={journeyThemeFor(snap.theme)}
             teamNames={teamNames}
             title={view.config.title}
             onReplay={onReplay}
@@ -130,8 +138,9 @@ export function RaceClient({ slug }: { slug: string }) {
           setSelected={setSelected}
         />
       ) : (
-        <EverestView
+        <JourneyView
           snap={snap}
+          jt={journeyThemeFor(snap.theme)}
           title={view.config.title}
           teamNames={teamNames}
           tMs={tMs}
@@ -148,7 +157,11 @@ export function RaceClient({ slug }: { slug: string }) {
           tMs={tMs}
           durationMs={durationMs}
           pushStartMs={snap.pushStartMs}
-          finaleLabel={snap.theme === 'olympics' ? 'Closing marquee' : 'Summit push'}
+          finaleLabel={
+            snap.theme === 'olympics'
+              ? 'Closing marquee'
+              : journeyThemeFor(snap.theme).finaleJumpLabel
+          }
           playing={clock.playback.playing}
           speed={clock.playback.speed}
           setPlaying={clock.setPlaying}
@@ -172,16 +185,37 @@ interface ViewProps<S> {
   setSelected: (i: number | null) => void;
 }
 
-function EverestView({
-  snap, title, teamNames, tMs, durationMs, demo, finale, selected, setSelected,
-}: ViewProps<EverestSnapshot>) {
+/** Resolve the client vocabulary for a journey theme id. */
+function journeyThemeFor(_theme: string): JourneyTheme {
+  // space registers its own vocabulary when the theme lands
+  return EVEREST_JOURNEY;
+}
+
+/** The map component contract every journey theme's map satisfies. */
+export interface JourneyMapProps {
+  snap: JourneySnapshot;
+  teamNames: string[];
+  tMs: number;
+  selected: number | null;
+  onSelect: (teamIdx: number | null) => void;
+  finale: boolean;
+}
+
+function journeyMapFor(_theme: string): React.ComponentType<JourneyMapProps> {
+  // space registers its own map when the theme lands
+  return MountainMap;
+}
+
+function JourneyView({
+  snap, jt, title, teamNames, tMs, durationMs, demo, finale, selected, setSelected,
+}: ViewProps<AnyJourneySnapshot> & { jt: JourneyTheme }) {
+  const MapComponent = journeyMapFor(snap.theme);
   const n = teamNames.length;
   const orderAt = useCallback(
     (t: number) => standingsAt(snap, n, t),
     [snap, n],
   );
-  const phase = PHASE_NAMES[phaseAt(tMs, durationMs)];
-  const label = phase.charAt(0).toUpperCase() + phase.slice(1);
+  const label = jt.phaseLabel(tMs, durationMs);
 
   return (
     <>
@@ -192,7 +226,7 @@ function EverestView({
 
       <div className="race-grid">
         <section className="map-pane">
-          <MountainMap
+          <MapComponent
             snap={snap}
             teamNames={teamNames}
             tMs={tMs}
@@ -204,7 +238,7 @@ function EverestView({
         <aside className="side-pane">
           {finale ? (
             <>
-              <FinaleSidebar snap={snap} teamNames={teamNames} tMs={tMs} />
+              <FinaleSidebar snap={snap} jt={jt} teamNames={teamNames} tMs={tMs} />
               <CommentaryFeed
                 events={snap.events}
                 colors={snap.colors}
@@ -216,6 +250,7 @@ function EverestView({
           ) : (
             <Standings
               snap={snap}
+              jt={jt}
               teamNames={teamNames}
               tMs={tMs}
               durationMs={durationMs}

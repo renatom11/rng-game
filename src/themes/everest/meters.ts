@@ -3,6 +3,22 @@ import { METER_KEYS } from './types';
 import { altitudeAt, nodeAtOrBelow } from './route';
 
 /**
+ * Route hooks that let another journey theme reuse these meter dynamics:
+ * strainAt maps display pos to the Everest-altitude strain scale
+ * (5364–8849; the drain math is calibrated to it), and canRestockAt says
+ * where resupply is possible.
+ */
+export interface MeterRouteFns {
+  strainAt: (pos: number) => number;
+  canRestockAt: (pos: number) => boolean;
+}
+
+const EVEREST_METER_FNS: MeterRouteFns = {
+  strainAt: altitudeAt,
+  canRestockAt: (pos) => nodeAtOrBelow(pos + 0.005).alt <= 6400,
+};
+
+/**
  * Per-team resource and condition meters on the shared sparse grid.
  * Rule-based dynamics driven by the display track (moving vs resting,
  * altitude, descents = resupply opportunities), so the numbers always tell
@@ -26,6 +42,7 @@ export function buildMeters(
   displayTrack: { tMs: number[]; pos: number[][] },
   durationMs: number,
   pushStartMs: number,
+  routeFns: MeterRouteFns = EVEREST_METER_FNS,
 ): number[][][] {
   const n = displayTrack.pos.length;
   const times = displayTrack.tMs;
@@ -51,12 +68,10 @@ export function buildMeters(
       const dtFrac = i === 0 ? 0 : (times[i] - times[i - 1]) / durationMs;
       const pos = displayTrack.pos[team][i];
       const prevPos = i === 0 ? pos : displayTrack.pos[team][i - 1];
-      const alt = altitudeAt(pos);
+      const alt = routeFns.strainAt(pos);
       maxAlt = Math.max(maxAlt, alt);
       const moving = pos - prevPos > 0.0005;
       const descending = prevPos - pos > 0.0005;
-      const atCampish = !moving && !descending;
-      const camp = nodeAtOrBelow(pos + 0.005);
       const high = alt > 7000;
       const inPush = t >= pushStartMs;
 
@@ -75,7 +90,7 @@ export function buildMeters(
       } else {
         // resting
         energy += recover * (alt < 6200 ? 1.6 : alt < 7200 ? 0.9 : 0.25);
-        if (!inPush && camp.alt <= 6400 && (o2 < 80 || food < 75)) {
+        if (!inPush && routeFns.canRestockAt(pos) && (o2 < 80 || food < 75)) {
           // resupply at Camp II or below
           o2 = Math.min(100, o2 + recover * 4);
           food = Math.min(100, food + recover * 4);

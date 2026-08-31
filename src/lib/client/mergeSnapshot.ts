@@ -1,5 +1,5 @@
 import type {
-  EverestSnapshot,
+  JourneySnapshot,
   OlympicsSnapshot,
   PublicSnapshot,
 } from '@/lib/slice';
@@ -20,21 +20,20 @@ export function mergeSnapshot(
   if (prev.theme !== next.theme) return null;
   if (next.sinceMs !== prev.horizonMs) return null; // gap or overlap — refetch
 
-  if (prev.theme === 'everest' && next.theme === 'everest') {
-    return mergeEverest(prev, next);
-  }
   if (prev.theme === 'olympics' && next.theme === 'olympics') {
     return mergeOlympics(prev, next);
+  }
+  if (prev.theme !== 'olympics' && next.theme !== 'olympics') {
+    return { ...mergeJourney(prev, next), theme: prev.theme };
   }
   return null;
 }
 
-function mergeEverest(
-  prev: EverestSnapshot,
-  next: EverestSnapshot,
-): EverestSnapshot {
+function mergeJourney(
+  prev: JourneySnapshot,
+  next: JourneySnapshot,
+): JourneySnapshot {
   return {
-    theme: 'everest',
     horizonMs: next.horizonMs,
     sinceMs: prev.sinceMs, // merged result covers what prev covered
     complete: false,

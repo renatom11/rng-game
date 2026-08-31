@@ -1,17 +1,19 @@
 'use client';
 
-import type { EverestSnapshot } from '@/lib/slice';
+import type { JourneySnapshot } from '@/lib/slice';
+import type { JourneyTheme } from '@/lib/client/journeyTheme';
 import { fmtClock } from './useRaceClock';
 import { ShareLink } from './Countdown';
 
 interface Props {
-  snap: EverestSnapshot;
+  snap: JourneySnapshot;
+  jt: JourneyTheme;
   teamNames: string[];
   title: string;
   onReplay: () => void;
 }
 
-export function ResultsRecap({ snap, teamNames, title, onReplay }: Props) {
+export function ResultsRecap({ snap, jt, teamNames, title, onReplay }: Props) {
   if (!snap.finalOrder || !snap.summitTimesMs) {
     return (
       <div className="results">
@@ -26,7 +28,7 @@ export function ResultsRecap({ snap, teamNames, title, onReplay }: Props) {
   return (
     <div className="results">
       <h1 className="race-title">{title}</h1>
-      <p className="results-sub">The mountain has decided. Final order:</p>
+      <p className="results-sub">The result is in. Final order:</p>
 
       <ol className="results-list">
         {snap.finalOrder.map((teamIdx, i) => {
@@ -41,8 +43,8 @@ export function ResultsRecap({ snap, teamNames, title, onReplay }: Props) {
               <span className="results-name">{teamNames[teamIdx]}</span>
               <span className="results-time">
                 {wiped
-                  ? 'Lost on the mountain — did not summit'
-                  : `summited at ${fmtClock(snap.summitTimesMs![teamIdx])}`}
+                  ? jt.resultsLostLine
+                  : jt.resultsFinishLine(fmtClock(snap.summitTimesMs![teamIdx]))}
               </span>
             </li>
           );
@@ -51,7 +53,7 @@ export function ResultsRecap({ snap, teamNames, title, onReplay }: Props) {
 
       <div className="results-actions">
         <button className="share-btn" onClick={onReplay}>
-          ▶ Replay the expedition
+          ▶ Replay it
         </button>
         <ShareLink />
       </div>

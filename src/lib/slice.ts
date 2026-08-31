@@ -57,8 +57,12 @@ export function horizonFor(
   return Math.min(durationMs, elapsedMs + pushLookaheadMs(durationMs));
 }
 
-export interface EverestSnapshot {
-  theme: 'everest';
+/**
+ * Journey-shaped snapshot: shared by every theme built on the Everest
+ * skeleton (route + display track + squads + meters). The theme literal is
+ * the only difference between Everest and Space at the data level.
+ */
+export interface JourneySnapshot {
   horizonMs: number;
   /** -1 = full snapshot; otherwise a delta covering (sinceMs, horizonMs]. */
   sinceMs: number;
@@ -80,6 +84,9 @@ export interface EverestSnapshot {
   summitTimesMs?: number[];
 }
 
+export type EverestSnapshot = JourneySnapshot & { theme: 'everest' };
+export type SpaceSnapshot = JourneySnapshot & { theme: 'space' };
+
 export interface OlympicsSnapshot {
   theme: 'olympics';
   horizonMs: number;
@@ -98,7 +105,7 @@ export interface OlympicsSnapshot {
   finalRank?: number[];
 }
 
-export type PublicSnapshot = EverestSnapshot | OlympicsSnapshot;
+export type PublicSnapshot = EverestSnapshot | SpaceSnapshot | OlympicsSnapshot;
 
 /** Index of the last entry in sorted `times` that is <= tMs (or -1). */
 function lastIndexAtOrBefore(times: number[], tMs: number): number {
@@ -123,17 +130,18 @@ function windowRange(
   return [lo, Math.max(lo, hi)];
 }
 
-export function toEverestSnapshot(
+export function toJourneySnapshot<T extends 'everest' | 'space'>(
+  theme: T,
   timeline: EverestTimeline,
   elapsedMs: number,
   opts: { complete: boolean; sinceMs?: number },
-): EverestSnapshot {
+): JourneySnapshot & { theme: T } {
   const { core } = timeline;
   const durationMs = core.grid.tMs[core.grid.tMs.length - 1];
 
   if (opts.complete) {
     return {
-      theme: 'everest',
+      theme,
       horizonMs: durationMs,
       sinceMs: -1,
       complete: true,
@@ -167,7 +175,7 @@ export function toEverestSnapshot(
   const inWindow = (t: number) => t > sinceMs && t <= horizonMs;
 
   return {
-    theme: 'everest',
+    theme,
     horizonMs,
     sinceMs,
     complete: false,
@@ -194,6 +202,22 @@ export function toEverestSnapshot(
     },
     wipeouts: timeline.wipeouts.filter((w) => inWindow(w.tMs)),
   };
+}
+
+export function toEverestSnapshot(
+  timeline: EverestTimeline,
+  elapsedMs: number,
+  opts: { complete: boolean; sinceMs?: number },
+): EverestSnapshot {
+  return toJourneySnapshot('everest', timeline, elapsedMs, opts);
+}
+
+export function toSpaceSnapshot(
+  timeline: EverestTimeline,
+  elapsedMs: number,
+  opts: { complete: boolean; sinceMs?: number },
+): SpaceSnapshot {
+  return toJourneySnapshot('space', timeline, elapsedMs, opts);
 }
 
 export function toOlympicsSnapshot(
