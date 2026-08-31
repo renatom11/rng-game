@@ -30,7 +30,7 @@ const IS_WIN = process.platform === 'win32';
 // policy can block; the .cmd wrappers always run (and need shell: true).
 const NPM = IS_WIN ? 'npm.cmd' : 'npm';
 const NPX = IS_WIN ? 'npx.cmd' : 'npx';
-const ENV = { ...process.env, WRANGLER_SEND_METRICS: 'false' };
+let ENV = { ...process.env, WRANGLER_SEND_METRICS: 'false' };
 
 let stepNo = 0;
 const bold = (s) => `\x1b[1m${s}\x1b[0m`;
@@ -49,28 +49,37 @@ if (process.argv.includes('--help') || process.argv.includes('-h')) {
   process.exit(0);
 }
 
-/** Run a command, streaming output while also capturing it. Stdin stays
- *  connected so wrangler's prompts (login, account picker) work. */
-function run(cmd, args, { input } = {}) {
+/**
+ * Run a command. `interactive: true` hands the child the real terminal, which
+ * matters more than it looks: wrangler suppresses every prompt when its
+ * stdout is a pipe, so a captured `login`, `d1 create` or first `deploy`
+ * silently auto-answers questions a new account has to answer itself. The
+ * cost is that we cannot read that command's output.
+ */
+function run(cmd, args, { input, interactive = false } = {}) {
   return new Promise((resolve) => {
     const child = spawn(cmd, args, {
       cwd: ROOT,
       env: ENV,
       shell: IS_WIN,
-      stdio: [input === undefined ? 'inherit' : 'pipe', 'pipe', 'pipe'],
+      stdio: interactive
+        ? 'inherit'
+        : [input === undefined ? 'inherit' : 'pipe', 'pipe', 'pipe'],
     });
     let out = '';
-    child.stdout.on('data', (d) => {
-      out += d;
-      process.stdout.write(d);
-    });
-    child.stderr.on('data', (d) => {
-      out += d;
-      process.stderr.write(d);
-    });
-    if (input !== undefined) {
-      child.stdin.write(input);
-      child.stdin.end();
+    if (!interactive) {
+      child.stdout.on('data', (d) => {
+        out += d;
+        process.stdout.write(d);
+      });
+      child.stderr.on('data', (d) => {
+        out += d;
+        process.stderr.write(d);
+      });
+      if (input !== undefined) {
+        child.stdin.write(input);
+        child.stdin.end();
+      }
     }
     child.on('close', (code) => resolve({ code, out }));
   });
@@ -89,6 +98,20 @@ function capture(cmd, args) {
 
 const wrangler = (args, opts) => run(NPX, ['wrangler', ...args], opts);
 const wranglerQuiet = (args) => capture(NPX, ['wrangler', ...args]);
+
+/** Ask wrangler where the Worker lives, since an interactive deploy's own
+ *  output goes straight to the terminal and cannot be read back. */
+function findLiveUrl() {
+  for (const args of [
+    ['deployments', 'status'],
+    ['deployments', 'list'],
+  ]) {
+    const res = wranglerQuiet(args);
+    const match = res.out.match(/https:\/\/[a-z0-9._-]+\.workers\.dev/i);
+    if (match) return match[0];
+  }
+  return null;
+}
 
 /** Wrangler prints banners and warnings around its JSON; find the payload. */
 function parseJsonLoose(text) {
@@ -156,19 +179,42 @@ async function main() {
   let who = wranglerQuiet(['whoami']);
   if (who.code !== 0 || /not authenticated|not logged in/i.test(who.out)) {
     note('opening a browser to log in to Cloudflare…');
-    const { code } = await wrangler(['login']);
+    const { code } = await wrangler(['login'], { interactive: true });
     if (code !== 0) die('Cloudflare login failed.', 'Re-run `npx wrangler login` and try again.');
     who = wranglerQuiet(['whoami']);
     if (who.code !== 0) die('Still not logged in after the browser step.');
   }
-  const accountId = (who.out.match(/\b[0-9a-f]{32}\b/) ?? [])[0] ?? null;
   const email = (who.out.match(/[\w.+-]+@[\w-]+\.[\w.-]+/) ?? [])[0];
+
+  // Pin the account for every later call. Without this, the quiet commands
+  // (which cannot prompt) fail outright for anyone whose login can see more
+  // than one account.
+  const found = [...new Set(who.out.match(/\b[0-9a-f]{32}\b/g) ?? [])];
+  let accountId = process.env.CLOUDFLARE_ACCOUNT_ID ?? null;
+  if (!accountId && found.length === 1) accountId = found[0];
+  if (!accountId && found.length > 1) {
+    die(
+      `Your Cloudflare login can see ${found.length} accounts, so I cannot tell which one to deploy to.`,
+      `Pick one and re-run with it set, e.g.\n    ${
+        IS_WIN ? '$env:CLOUDFLARE_ACCOUNT_ID="<id>"' : 'export CLOUDFLARE_ACCOUNT_ID=<id>'
+      }\n  Accounts seen: ${found.join(', ')}`,
+    );
+  }
+  if (accountId) ENV = { ...ENV, CLOUDFLARE_ACCOUNT_ID: accountId };
   ok(`logged in${email ? ` as ${email}` : ''}${accountId ? ` (account ${accountId})` : ''}`);
 
   /* 2. database ---------------------------------------------------------- */
   step(`Finding or creating the "${DB_NAME}" D1 database`);
   const findDb = () => {
     const listed = wranglerQuiet(['d1', 'list', '--json']);
+    // Distinguish "no databases" from "the command failed" — treating a
+    // failure as an empty list would try to create a database that exists.
+    if (listed.code !== 0) {
+      die(
+        'Could not list your D1 databases.',
+        `wrangler said:\n${listed.out.trim().split('\n').slice(-4).join('\n')}`,
+      );
+    }
     return asList(parseJsonLoose(listed.out)).find((d) => nameOf(d) === DB_NAME);
   };
   let database = findDb();
@@ -176,7 +222,7 @@ async function main() {
     ok(`found existing database (${idOf(database)})`);
   } else {
     note('none found — creating it');
-    const { code } = await wrangler(['d1', 'create', DB_NAME]);
+    const { code } = await wrangler(['d1', 'create', DB_NAME], { interactive: true });
     if (code !== 0) die('Could not create the D1 database.');
     database = findDb();
     if (!database) die('Created the database but could not read its id back.', 'Run `npx wrangler d1 list` and paste the id into wrangler.jsonc.');
@@ -200,23 +246,33 @@ async function main() {
 
   /* 4. deploy ------------------------------------------------------------ */
   step('Building and deploying the Worker (a minute or two)');
-  const deploy = await run(NPM, ['run', 'deploy:cf']);
+  // Interactive: a first deploy on a fresh account has to ask which
+  // workers.dev subdomain to register, and that prompt never appears if we
+  // are capturing stdout — so the deploy would answer for you and fail.
+  const deploy = await run(NPM, ['run', 'deploy:cf'], { interactive: true });
   if (deploy.code !== 0) die('The deploy failed — the output above says why.');
-  const urls = deploy.out.match(/https:\/\/[a-z0-9._-]+\.workers\.dev/gi) ?? [];
-  const liveUrl = urls[urls.length - 1] ?? null;
-  ok(liveUrl ? `deployed to ${liveUrl}` : 'deployed');
+  const liveUrl = findLiveUrl();
+  ok(liveUrl ? `deployed to ${liveUrl}` : 'deployed — your URL is in the output above');
 
   /* 5. signing secret ---------------------------------------------------- */
   step('Setting the recovery-code signing secret');
-  const secrets = asList(parseJsonLoose(wranglerQuiet(['secret', 'list', '--json']).out));
-  if (secrets.some((s) => (s?.name ?? s) === SECRET_NAME)) {
+  // `secret list` takes --format, not --json. Getting that wrong made this
+  // read fail, look like "no secrets set", and silently mint a NEW secret on
+  // every run — which invalidates every recovery code already handed out. So
+  // anything short of a confirmed "not present" now leaves the secret alone.
+  const listed = wranglerQuiet(['secret', 'list', '--format', 'json']);
+  const secrets = listed.code === 0 ? asList(parseJsonLoose(listed.out)) : null;
+  if (secrets === null) {
+    note('could not read the existing secrets, so leaving them untouched');
+    note(`if ${SECRET_NAME} is not set yet: npx wrangler secret put ${SECRET_NAME}`);
+  } else if (secrets.some((s) => (s?.name ?? s) === SECRET_NAME)) {
     ok(`${SECRET_NAME} is already set — leaving it as it is`);
   } else {
     const value = randomBytes(32).toString('base64url');
     const { code } = await run(NPX, ['wrangler', 'secret', 'put', SECRET_NAME], { input: value });
     if (code !== 0) {
       note(`Could not set ${SECRET_NAME} automatically.`);
-      note(`Add it by hand: dashboard → the summit Worker → Settings → Variables and Secrets.`);
+      note('Add it by hand: dashboard → the summit Worker → Settings → Variables and Secrets.');
     } else {
       ok(`${SECRET_NAME} generated and stored (Cloudflare keeps it; it is not saved locally)`);
     }

@@ -154,12 +154,15 @@ didn't already decide.
 
 ## Testing
 
-`npm test` runs 93 tests: byte-level determinism, chi-square uniformity,
+`npm test` runs 97 tests: byte-level determinism, chi-square uniformity,
 pairwise head-to-head balance, reachability cell coverage, convergence rank
 bounds through the finale, monotonicity/no-teleport guards, resource-range
 and continuity checks, wipeout placement constraints, event-density and
 silent-gap rules, template slot integrity, points-table realization, live
 curve convergence, API-level leak scans of serialized payloads, and the
+storage layer (a retried upload replaces rows instead of colliding, and a
+schema bootstrap that never settles cannot wedge later writes — the exact
+shape a cancelled Workers request produces); and the
 squad layer: dossier/heritage integrity, death-cause altitude rules,
 mortality-rate bounds, sirdar protection, vitals ranges, and proof that
 the short-handed pace lag is byte-identical to no-lag before each death

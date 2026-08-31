@@ -46,14 +46,14 @@ export interface RaceStorage {
 
 /* ---------------- D1 driver --------------------------------------------- */
 
-interface D1Stmt {
+export interface D1Stmt {
   bind(...args: unknown[]): D1Stmt;
   first<T>(): Promise<T | null>;
   run(): Promise<unknown>;
   all<T>(): Promise<{ results: T[] }>;
 }
 
-interface D1Like {
+export interface D1Like {
   prepare(sql: string): D1Stmt;
   batch(stmts: D1Stmt[]): Promise<unknown>;
 }
@@ -65,22 +65,21 @@ interface D1Like {
  * zero-cost path and only fall back to bootstrapping if they actually hit a
  * missing table — which can only happen on a deployment where no race has
  * ever been created.
+ *
+ * Deliberately a plain boolean and not a cached in-flight promise: an
+ * unsettled promise created inside one request belongs to that request's
+ * I/O context, and if that request is cancelled (the user closes the tab
+ * mid-create) workerd cancels its continuations, so a cached promise would
+ * never settle and every later write in the isolate would hang on it
+ * forever. The DDL is all IF NOT EXISTS, so letting two concurrent requests
+ * race through it costs nothing.
  */
-let d1SchemaReady: Promise<void> | null = null;
+let d1SchemaDone = false;
 
-function ensureD1Schema(db: D1Like): Promise<void> {
-  if (d1SchemaReady) return d1SchemaReady;
-  const started = (async () => {
-    try {
-      await db.batch(SCHEMA_STATEMENTS.map((sql) => db.prepare(sql)));
-    } catch (err) {
-      // A transient failure must not poison the isolate for good.
-      d1SchemaReady = null;
-      throw err;
-    }
-  })();
-  d1SchemaReady = started;
-  return started;
+async function ensureD1Schema(db: D1Like): Promise<void> {
+  if (d1SchemaDone) return;
+  await db.batch(SCHEMA_STATEMENTS.map((sql) => db.prepare(sql)));
+  d1SchemaDone = true;
 }
 
 function isMissingTable(err: unknown): boolean {
@@ -93,13 +92,14 @@ async function readGuarded<T>(db: D1Like, fn: () => Promise<T>): Promise<T> {
     return await fn();
   } catch (err) {
     if (!isMissingTable(err)) throw err;
-    d1SchemaReady = null;
+    d1SchemaDone = false;
     await ensureD1Schema(db);
     return fn();
   }
 }
 
-function d1Storage(db: D1Like): RaceStorage {
+/** The D1 driver over any D1-shaped binding. Exported for tests. */
+export function d1Storage(db: D1Like): RaceStorage {
   return {
     async getMeta(id) {
       return readGuarded(db, () =>
@@ -119,7 +119,7 @@ function d1Storage(db: D1Like): RaceStorage {
     async putTimeline(id, chunks, finalsBody) {
       await ensureD1Schema(db);
       const insert = db.prepare(
-        'INSERT INTO race_chunks (race_id, idx, from_ms, to_ms, body) VALUES (?, ?, ?, ?, ?)',
+        'INSERT OR REPLACE INTO race_chunks (race_id, idx, from_ms, to_ms, body) VALUES (?, ?, ?, ?, ?)',
       );
       const BATCH = 80;
       for (let i = 0; i < chunks.length; i += BATCH) {
@@ -130,7 +130,7 @@ function d1Storage(db: D1Like): RaceStorage {
         );
       }
       await db.batch([
-        db.prepare('INSERT INTO race_finals (race_id, body) VALUES (?, ?)').bind(id, finalsBody),
+        db.prepare('INSERT OR REPLACE INTO race_finals (race_id, body) VALUES (?, ?)').bind(id, finalsBody),
         db.prepare('UPDATE race_meta SET ready = 1 WHERE id = ?').bind(id),
       ]);
     },
@@ -191,10 +191,10 @@ async function getNodeStorage(): Promise<RaceStorage> {
       db.exec('BEGIN');
       try {
         const insert = db.prepare(
-          'INSERT INTO race_chunks (race_id, idx, from_ms, to_ms, body) VALUES (?, ?, ?, ?, ?)',
+          'INSERT OR REPLACE INTO race_chunks (race_id, idx, from_ms, to_ms, body) VALUES (?, ?, ?, ?, ?)',
         );
         for (const c of chunks) insert.run(id, c.idx, c.fromMs, c.toMs, c.body);
-        db.prepare('INSERT INTO race_finals (race_id, body) VALUES (?, ?)').run(id, finalsBody);
+        db.prepare('INSERT OR REPLACE INTO race_finals (race_id, body) VALUES (?, ?)').run(id, finalsBody);
         db.prepare('UPDATE race_meta SET ready = 1 WHERE id = ?').run(id);
         db.exec('COMMIT');
       } catch (err) {
@@ -235,7 +235,7 @@ async function getNodeStorage(): Promise<RaceStorage> {
 /** Test hook mirror of resetDbForTests — clears the cached driver too. */
 export function resetStorageForTests(): void {
   nodeStorage = null;
-  d1SchemaReady = null;
+  d1SchemaDone = false;
 }
 
 /* ---------------- selection --------------------------------------------- */
