@@ -126,8 +126,15 @@ async function main() {
   /* 0. dependencies ----------------------------------------------------- */
   if (!existsSync(path.join(ROOT, 'node_modules', 'wrangler'))) {
     step('Installing dependencies');
-    const { code } = await run(NPM, ['install']);
-    if (code !== 0) die('npm install failed.');
+    let { code } = await run(NPM, ['install']);
+    if (code !== 0) {
+      // The only native module here is the optional SQLite driver, which
+      // needs a C++ toolchain when no prebuilt binary matches your Node
+      // version. Cloudflare uses D1 instead, so skipping it costs nothing.
+      note('install failed — retrying without the optional native SQLite driver');
+      ({ code } = await run(NPM, ['install', '--omit=optional']));
+    }
+    if (code !== 0) die('npm install failed — the output above says why.');
     ok('dependencies installed');
   }
 

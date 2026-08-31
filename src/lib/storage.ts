@@ -173,13 +173,13 @@ async function getNodeStorage(): Promise<RaceStorage> {
   nodeStorage = {
     async getMeta(id) {
       return (
-        (getDb().prepare('SELECT * FROM race_meta WHERE id = ?').get(id) as
+        ((await getDb()).prepare('SELECT * FROM race_meta WHERE id = ?').get(id) as
           | RaceMetaRow
           | undefined) ?? null
       );
     },
     async insertMeta(r) {
-      getDb()
+      (await getDb())
         .prepare(
           `INSERT INTO race_meta (id, theme, seed, config_json, created_at, start_at, duration_ms, ready)
            VALUES (?, ?, ?, ?, ?, ?, ?, 0)`,
@@ -187,7 +187,7 @@ async function getNodeStorage(): Promise<RaceStorage> {
         .run(r.id, r.theme, r.seed, r.config_json, r.created_at, r.start_at, r.duration_ms);
     },
     async putTimeline(id, chunks, finalsBody) {
-      const db = getDb();
+      const db = await getDb();
       const tx = db.transaction(() => {
         const insert = db.prepare(
           'INSERT INTO race_chunks (race_id, idx, from_ms, to_ms, body) VALUES (?, ?, ?, ?, ?)',
@@ -199,7 +199,7 @@ async function getNodeStorage(): Promise<RaceStorage> {
       tx();
     },
     async getChunks(id, afterIdx, maxToMs) {
-      const db = getDb();
+      const db = await getDb();
       return maxToMs === null
         ? (db
             .prepare('SELECT idx, body FROM race_chunks WHERE race_id = ? AND idx > ? ORDER BY idx')
@@ -211,7 +211,7 @@ async function getNodeStorage(): Promise<RaceStorage> {
             .all(id, afterIdx, maxToMs) as StoredChunk[]);
     },
     async getFinals(id) {
-      const row = getDb().prepare('SELECT body FROM race_finals WHERE race_id = ?').get(id) as
+      const row = (await getDb()).prepare('SELECT body FROM race_finals WHERE race_id = ?').get(id) as
         | { body: string }
         | undefined;
       return row?.body ?? null;

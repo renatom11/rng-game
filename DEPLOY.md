@@ -84,3 +84,8 @@ npm run migrate:cf     # optional — the app creates its own tables anyway
 - The Node/VPS path still works unchanged (`npm run build && npm start` with
   `SUMMIT_DB_PATH` on a disk) — the storage seam picks the right driver by
   environment.
+- `better-sqlite3` is an **optional** dependency, used only by that Node
+  path. It is a native module, so on a machine with no prebuilt binary for
+  its Node version and no C++ toolchain it simply will not install — and
+  nothing breaks: the build, the deploy, and the running site never touch
+  it, because Cloudflare uses D1. (`npm test` and `npm run dev` do need it.)
