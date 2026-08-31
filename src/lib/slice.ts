@@ -104,7 +104,12 @@ export interface OlympicsSnapshot {
   /** Full schedule metadata is public — only results are spoilers. */
   schedule: ScheduledEvent[];
   pointsKeyframes: PointsKeyframe[];
-  live: { tMs: number[]; score: number[][] }[];
+  /**
+   * Per-event score curves, positional by event index. `null` means "this
+   * event has nothing in this window" — spelling that out as an object full
+   * of empty arrays cost megabytes once a race had thousands of chunks.
+   */
+  live: (OlympicsLiveCurve | null)[];
   events: OlympicsRaceEvent[];
   finalOrder?: number[];
   finalRank?: number[];
@@ -276,6 +281,11 @@ export function toOlympicsSnapshot(
   return toOlympicsWindow(timeline, sinceMs, horizonMs);
 }
 
+export interface OlympicsLiveCurve {
+  tMs: number[];
+  score: number[][];
+}
+
 /** Exact-window slice for the Olympics shape; see toJourneyWindow. */
 export function toOlympicsWindow(
   timeline: OlympicsTimeline,
@@ -298,6 +308,7 @@ export function toOlympicsWindow(
     pointsKeyframes: timeline.pointsKeyframes.filter((f) => inWindow(f.tMs)),
     live: timeline.live.map((lv) => {
       const [lo, hi] = windowRange(lv.tMs, sinceMs, horizonMs);
+      if (lo >= hi) return null;
       return {
         tMs: lv.tMs.slice(lo, hi),
         score: lv.score.map((row) => row.slice(lo, hi)),

@@ -83,13 +83,33 @@ function mergeOlympics(
     pushStartMs: next.pushStartMs,
     schedule: prev.schedule,
     pointsKeyframes: [...prev.pointsKeyframes, ...next.pointsKeyframes],
-    live: prev.live.map((lv, k) => ({
-      tMs: [...lv.tMs, ...(next.live[k]?.tMs ?? [])],
-      score: lv.score.map((row, i) => [
-        ...row,
-        ...(next.live[k]?.score[i] ?? []),
-      ]),
-    })),
+    live: mergeLiveCurves(prev.live, next.live),
     events: [...prev.events, ...next.events],
   };
+}
+
+/**
+ * Concatenate per-event live curves positionally. Either side may hold null
+ * for an event with nothing in its window, so a curve can start in a later
+ * chunk than the one that first mentioned the event.
+ */
+function mergeLiveCurves(
+  prev: OlympicsSnapshot['live'],
+  next: OlympicsSnapshot['live'],
+): OlympicsSnapshot['live'] {
+  const count = Math.max(prev.length, next.length);
+  const out: OlympicsSnapshot['live'] = [];
+  for (let k = 0; k < count; k++) {
+    const a = prev[k] ?? null;
+    const b = next[k] ?? null;
+    if (!a || !b) {
+      out.push(a ?? b);
+      continue;
+    }
+    out.push({
+      tMs: [...a.tMs, ...b.tMs],
+      score: a.score.map((row, i) => [...row, ...(b.score[i] ?? [])]),
+    });
+  }
+  return out;
 }

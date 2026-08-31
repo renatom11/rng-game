@@ -133,7 +133,7 @@ describe('olympics theme', () => {
     }
     for (const e of snap.events) expect(e.tMs).toBeLessThanOrEqual(snap.horizonMs);
     for (const lv of snap.live) {
-      for (const tm of lv.tMs) expect(tm).toBeLessThanOrEqual(snap.horizonMs);
+      for (const tm of lv?.tMs ?? []) expect(tm).toBeLessThanOrEqual(snap.horizonMs);
     }
     const json = JSON.stringify(snap);
     expect(json).not.toContain('"finalOrder"');
