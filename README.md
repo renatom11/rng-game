@@ -43,9 +43,11 @@ Three properties are enforced by construction and by tests:
 2. **Reachability** — at the last pre-finale checkpoint, every
    (current rank → final rank) transition occurs with positive frequency.
 3. **Spoiler-proofing** — the timeline is precomputed and stored, but the API
-   serves only what has already happened (plus a 60-second rendering
-   lookahead). The final order, future events, curves, and results never
-   leave the server while a race runs. Your browser *cannot* be used to peek.
+   serves only what has already happened, plus a small phased rendering
+   lookahead that is hard-capped at the final act's start (and shrinks to a
+   few seconds inside it). The final order, future events, curves, and
+   results never leave the server while a race runs. Your browser *cannot*
+   be used to peek.
 
 Demo races opt out of spoiler-proofing and get playback controls
 (1×–600× speed and a scrubber) so you can watch an "8-hour" race in a minute.
@@ -110,7 +112,7 @@ didn't already decide.
 
 ## Testing
 
-`npm test` runs ~50 tests: byte-level determinism, chi-square uniformity,
+`npm test` runs 70 tests: byte-level determinism, chi-square uniformity,
 pairwise head-to-head balance, reachability cell coverage, convergence rank
 bounds through the finale, monotonicity/no-teleport guards, resource-range
 and continuity checks, wipeout placement constraints, event-density and
