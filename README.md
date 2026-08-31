@@ -94,9 +94,13 @@ npm run build && npm start   # production
 ```
 
 The SQLite database lives at `./data/summit.db` by default
-(`SUMMIT_DB_PATH` overrides; races are immutable rows — no migrations, no
-background jobs, status is derived from the clock). Deploy as a single
-persistent Node server; the app is deliberately not serverless-shaped.
+(`SUMMIT_DB_PATH` overrides; rows are immutable, status is derived from the
+clock, and both drivers create their own tables — nothing to migrate).
+
+To put it online, `npm run setup:cf` deploys it to the **Cloudflare Workers
+free tier** in one command (D1 database, signing secret, live URL and all) —
+see [DEPLOY.md](./DEPLOY.md). A single persistent Node server
+(`npm run build && npm start`) works just as well.
 
 ## Architecture
 

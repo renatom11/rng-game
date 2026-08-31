@@ -12,7 +12,8 @@
     "build:cf": "opennextjs-cloudflare build",
     "preview:cf": "opennextjs-cloudflare build && wrangler dev",
     "deploy:cf": "opennextjs-cloudflare build && opennextjs-cloudflare deploy",
-    "migrate:cf": "wrangler d1 migrations apply SUMMIT_DB --remote"
+    "migrate:cf": "wrangler d1 migrations apply SUMMIT_DB --remote",
+    "setup:cf": "node scripts/setup-cloudflare.mjs"
   },
   "dependencies": {
     "better-sqlite3": "^11.10.0",

@@ -12,6 +12,8 @@
  * status is always derived from the clock.
  */
 
+import { SCHEMA_STATEMENTS } from './schema';
+
 export interface RaceMetaRow {
   id: string;
   theme: string;
@@ -56,12 +58,56 @@ interface D1Like {
   batch(stmts: D1Stmt[]): Promise<unknown>;
 }
 
+/**
+ * D1 needs its tables to exist, and a brand-new deployment has none. Rather
+ * than make a migration step part of every setup path, the driver applies
+ * the (idempotent) schema once per isolate, on the first write. Reads keep a
+ * zero-cost path and only fall back to bootstrapping if they actually hit a
+ * missing table — which can only happen on a deployment where no race has
+ * ever been created.
+ */
+let d1SchemaReady: Promise<void> | null = null;
+
+function ensureD1Schema(db: D1Like): Promise<void> {
+  if (d1SchemaReady) return d1SchemaReady;
+  const started = (async () => {
+    try {
+      await db.batch(SCHEMA_STATEMENTS.map((sql) => db.prepare(sql)));
+    } catch (err) {
+      // A transient failure must not poison the isolate for good.
+      d1SchemaReady = null;
+      throw err;
+    }
+  })();
+  d1SchemaReady = started;
+  return started;
+}
+
+function isMissingTable(err: unknown): boolean {
+  return /no such table/i.test(err instanceof Error ? err.message : String(err));
+}
+
+/** Run a read, bootstrapping the schema and retrying once if it's absent. */
+async function readGuarded<T>(db: D1Like, fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn();
+  } catch (err) {
+    if (!isMissingTable(err)) throw err;
+    d1SchemaReady = null;
+    await ensureD1Schema(db);
+    return fn();
+  }
+}
+
 function d1Storage(db: D1Like): RaceStorage {
   return {
     async getMeta(id) {
-      return db.prepare('SELECT * FROM race_meta WHERE id = ?').bind(id).first<RaceMetaRow>();
+      return readGuarded(db, () =>
+        db.prepare('SELECT * FROM race_meta WHERE id = ?').bind(id).first<RaceMetaRow>(),
+      );
     },
     async insertMeta(r) {
+      await ensureD1Schema(db);
       await db
         .prepare(
           `INSERT INTO race_meta (id, theme, seed, config_json, created_at, start_at, duration_ms, ready)
@@ -71,6 +117,7 @@ function d1Storage(db: D1Like): RaceStorage {
         .run();
     },
     async putTimeline(id, chunks, finalsBody) {
+      await ensureD1Schema(db);
       const insert = db.prepare(
         'INSERT INTO race_chunks (race_id, idx, from_ms, to_ms, body) VALUES (?, ?, ?, ?, ?)',
       );
@@ -88,26 +135,30 @@ function d1Storage(db: D1Like): RaceStorage {
       ]);
     },
     async getChunks(id, afterIdx, maxToMs) {
-      const stmt =
-        maxToMs === null
-          ? db
-              .prepare(
-                'SELECT idx, body FROM race_chunks WHERE race_id = ? AND idx > ? ORDER BY idx',
-              )
-              .bind(id, afterIdx)
-          : db
-              .prepare(
-                'SELECT idx, body FROM race_chunks WHERE race_id = ? AND idx > ? AND to_ms <= ? ORDER BY idx',
-              )
-              .bind(id, afterIdx, maxToMs);
-      return (await stmt.all<StoredChunk>()).results;
+      return readGuarded(db, async () => {
+        const stmt =
+          maxToMs === null
+            ? db
+                .prepare(
+                  'SELECT idx, body FROM race_chunks WHERE race_id = ? AND idx > ? ORDER BY idx',
+                )
+                .bind(id, afterIdx)
+            : db
+                .prepare(
+                  'SELECT idx, body FROM race_chunks WHERE race_id = ? AND idx > ? AND to_ms <= ? ORDER BY idx',
+                )
+                .bind(id, afterIdx, maxToMs);
+        return (await stmt.all<StoredChunk>()).results;
+      });
     },
     async getFinals(id) {
-      const row = await db
-        .prepare('SELECT body FROM race_finals WHERE race_id = ?')
-        .bind(id)
-        .first<{ body: string }>();
-      return row?.body ?? null;
+      return readGuarded(db, async () => {
+        const row = await db
+          .prepare('SELECT body FROM race_finals WHERE race_id = ?')
+          .bind(id)
+          .first<{ body: string }>();
+        return row?.body ?? null;
+      });
     },
   };
 }
@@ -172,6 +223,7 @@ async function getNodeStorage(): Promise<RaceStorage> {
 /** Test hook mirror of resetDbForTests — clears the cached driver too. */
 export function resetStorageForTests(): void {
   nodeStorage = null;
+  d1SchemaReady = null;
 }
 
 /* ---------------- selection --------------------------------------------- */

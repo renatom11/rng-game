@@ -1,6 +1,7 @@
 import Database from 'better-sqlite3';
 import fs from 'node:fs';
 import path from 'node:path';
+import { SCHEMA_SQL } from './schema';
 
 /**
  * SQLite storage (Node driver). Schema mirrors the D1 migrations: a race is
@@ -19,30 +20,7 @@ export function getDb(): Database.Database {
   }
   db = new Database(dbPath);
   db.pragma('journal_mode = WAL');
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS race_meta (
-      id            TEXT PRIMARY KEY,
-      theme         TEXT NOT NULL DEFAULT 'everest',
-      seed          TEXT NOT NULL,
-      config_json   TEXT NOT NULL,
-      created_at    INTEGER NOT NULL,
-      start_at      INTEGER NOT NULL,
-      duration_ms   INTEGER NOT NULL,
-      ready         INTEGER NOT NULL DEFAULT 0
-    );
-    CREATE TABLE IF NOT EXISTS race_chunks (
-      race_id TEXT NOT NULL,
-      idx     INTEGER NOT NULL,
-      from_ms INTEGER NOT NULL,
-      to_ms   INTEGER NOT NULL,
-      body    TEXT NOT NULL,
-      PRIMARY KEY (race_id, idx)
-    );
-    CREATE TABLE IF NOT EXISTS race_finals (
-      race_id TEXT PRIMARY KEY,
-      body    TEXT NOT NULL
-    );
-  `);
+  db.exec(SCHEMA_SQL);
   return db;
 }
 
