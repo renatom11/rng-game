@@ -21,12 +21,11 @@ import { displayPosAt, teamStatesAt, teamTags } from '@/lib/client/raceState';
 import { sceneLight } from '@/themes/everest/scene';
 import {
   buildContours,
-  buildStars,
+  buildFarRange,
   buildTerrain,
   CAM_PRESETS,
   CAM_SUMMIT_WIDE,
   heightAt,
-  IMPOSTORS,
   posToXYZ,
   ROUTE3,
   sunDir,
@@ -93,6 +92,29 @@ function glowTexture(color: string): THREE.CanvasTexture {
   return new THREE.CanvasTexture(c);
 }
 
+/** The moon is a body, not a blur: a crisp disc inside a tight bloom. */
+function moonTexture(): THREE.CanvasTexture {
+  const c = document.createElement('canvas');
+  c.width = c.height = 128;
+  const g = c.getContext('2d')!;
+  const bloom = g.createRadialGradient(64, 64, 18, 64, 64, 64);
+  bloom.addColorStop(0, 'rgba(226, 234, 250, 0.55)');
+  bloom.addColorStop(1, 'rgba(226, 234, 250, 0)');
+  g.fillStyle = bloom;
+  g.fillRect(0, 0, 128, 128);
+  g.beginPath();
+  g.arc(64, 64, 20, 0, Math.PI * 2);
+  g.fillStyle = '#eef3fd';
+  g.fill();
+  // A hint of maria so the disc reads lunar, not lamp.
+  g.globalAlpha = 0.16;
+  g.fillStyle = '#9fb0cf';
+  g.beginPath(); g.arc(57, 58, 7, 0, Math.PI * 2); g.fill();
+  g.beginPath(); g.arc(70, 68, 5, 0, Math.PI * 2); g.fill();
+  g.globalAlpha = 1;
+  return new THREE.CanvasTexture(c);
+}
+
 function beamTexture(color: string): THREE.CanvasTexture {
   const c = document.createElement('canvas');
   c.width = 32;
@@ -123,7 +145,11 @@ export function MountainMap3D(props: Props) {
 
     const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
     const renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setPixelRatio(Math.min(1.75, window.devicePixelRatio || 1));
+    renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+    // Filmic response: highlights roll off instead of clipping, so sunlit
+    // snow keeps its form. The sky shader applies the same curve itself.
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.12;
     wrap.appendChild(renderer.domElement);
     renderer.domElement.className = 'm3d-canvas';
 
@@ -143,13 +169,23 @@ export function MountainMap3D(props: Props) {
     controls.autoRotateSpeed = 0.32;
 
     // --- sky dome -------------------------------------------------------
+    // The sky is a shader, not a gradient: three star layers and the Milky
+    // Way wheel slowly overhead at night, a warm mound of light gathers
+    // around the sun at dawn and dusk, and a storm drains it all to murk.
     const skyUniforms = {
       topC: { value: new THREE.Color('#0b1530') },
       midC: { value: new THREE.Color('#27436b') },
       horC: { value: new THREE.Color('#8ea6c8') },
+      glowC: { value: new THREE.Color('#ffb46b') },
+      uSun: { value: new THREE.Vector3(1, 0.2, 0) },
+      uStars: { value: 0 },
+      uStorm: { value: 0 },
+      uBand: { value: 0 },
+      uDay: { value: 1 },
+      uTime: { value: 0 },
     };
     const sky = new THREE.Mesh(
-      new THREE.SphereGeometry(46000, 32, 18),
+      new THREE.SphereGeometry(46000, 48, 28),
       new THREE.ShaderMaterial({
         side: THREE.BackSide,
         depthWrite: false,
@@ -158,12 +194,86 @@ export function MountainMap3D(props: Props) {
           'varying vec3 vP; void main(){ vP = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
         fragmentShader: `
           varying vec3 vP;
-          uniform vec3 topC; uniform vec3 midC; uniform vec3 horC;
+          uniform vec3 topC; uniform vec3 midC; uniform vec3 horC; uniform vec3 glowC;
+          uniform vec3 uSun;
+          uniform float uStars; uniform float uStorm; uniform float uBand;
+          uniform float uDay; uniform float uTime;
+          float h21(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+          float h31(vec3 p){ return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453); }
+          float n2(vec2 p){
+            vec2 i = floor(p); vec2 f = fract(p); vec2 u = f * f * (3.0 - 2.0 * f);
+            return mix(mix(h21(i), h21(i + vec2(1.0, 0.0)), u.x),
+                       mix(h21(i + vec2(0.0, 1.0)), h21(i + vec2(1.0, 1.0)), u.x), u.y);
+          }
+          float fbm(vec2 p){ return n2(p) * 0.55 + n2(p * 2.13 + 7.7) * 0.28 + n2(p * 4.41 + 3.1) * 0.17; }
+          float starLayer(vec3 p, float density, float sharp){
+            vec3 id = floor(p);
+            float m = h31(id);
+            if (m > density) return 0.0;
+            vec3 f = fract(p) - 0.5;
+            vec3 jit = vec3(h31(id + 17.1), h31(id + 31.7), h31(id + 47.3)) - 0.5;
+            float d = length(f - jit * 0.7);
+            float mag = pow(h31(id + 3.7), 5.0);
+            float tw = 0.72 + 0.28 * sin(uTime * (1.5 + h31(id + 9.1) * 4.0) + h31(id + 13.0) * 40.0);
+            return smoothstep(sharp * (0.6 + mag), 0.0, d) * (0.3 + mag * 2.2) * tw;
+          }
+          vec3 aces(vec3 x){
+            return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0);
+          }
           void main(){
-            float h = normalize(vP).y;
-            float lo = smoothstep(-0.04, 0.10, h);
-            float hi = smoothstep(0.07, 0.55, h);
+            vec3 d = normalize(vP);
+            float h = d.y;
+            float lo = smoothstep(-0.04, 0.11, h);
+            float hi = smoothstep(0.06, mix(0.55, 0.36, uBand), h);
             vec3 c = mix(horC, mix(midC, topC, hi), lo);
+            // At dusk the fire stays low: the upper sky cools toward night
+            // fast, so alpenglow reads as a band, not a ceiling.
+            float coolUp = uBand * smoothstep(0.10, 0.32, h) * 0.4;
+            c = mix(c, vec3(dot(c, vec3(0.3, 0.42, 0.28))) * 0.72, coolUp);
+
+            // Dawn and dusk gather around the sun's azimuth, not everywhere.
+            vec3 sunN = normalize(uSun);
+            float az = max(dot(normalize(vec3(d.x, 0.0, d.z)), normalize(vec3(sunN.x, 0.0, sunN.z))), 0.0);
+            float mound = pow(az, 3.0) * exp(-max(h, 0.0) * 5.5);
+            c += glowC * uBand * mound * 0.45;
+
+            // The sun: a hot core inside the sprite bloom.
+            float sd = max(dot(d, sunN), 0.0);
+            float sunVis = smoothstep(-0.02, 0.06, sunN.y) * uDay;
+            c += vec3(1.0, 0.86, 0.62) * (pow(sd, 2600.0) * 3.0 + pow(sd, 220.0) * 0.5 + pow(sd, 18.0) * 0.10) * sunVis;
+
+            // Night: the whole sky comes out.
+            float sv = uStars * (1.0 - uStorm) * smoothstep(0.0, 0.14, h);
+            if (sv > 0.004) {
+              float ca = cos(uTime * 0.004); float sa = sin(uTime * 0.004);
+              vec3 r = vec3(d.x * ca - d.z * sa, d.y, d.x * sa + d.z * ca);
+              vec3 M = normalize(vec3(0.42, 0.30, 0.86));
+              vec3 T1 = normalize(cross(M, vec3(0.0, 1.0, 0.0)));
+              vec3 T2 = cross(M, T1);
+              float bc = dot(r, M);
+              vec2 q = vec2(dot(r, T1), dot(r, T2)) * 3.0;
+              float core = exp(-bc * bc * 26.0);
+              float cloud = fbm(q * 2.2 + 11.0);
+              float lane = smoothstep(0.42, 0.78, fbm(q * 3.1 + 4.7)) * exp(-bc * bc * 110.0);
+              float mw = core * (0.30 + 0.75 * cloud) * (1.0 - 0.78 * lane);
+              c += (vec3(0.55, 0.64, 0.82) + vec3(0.25, 0.16, 0.05) * cloud) * mw * 0.58 * sv;
+              float s1 = starLayer(r * 60.0, 0.11, 0.22);
+              float s2 = starLayer(r * 130.0 + 31.0, 0.2, 0.3);
+              float s3 = starLayer(r * 260.0 + 77.0, 0.27 + core * 0.25, 0.38);
+              vec3 warm = vec3(1.0, 0.90, 0.78);
+              vec3 cold = vec3(0.78, 0.86, 1.0);
+              c += mix(cold, warm, h31(floor(r * 60.0) + 29.0)) * s1 * 1.15 * sv;
+              c += mix(cold, vec3(1.0), 0.5) * s2 * 0.8 * sv;
+              c += vec3(0.9, 0.94, 1.0) * s3 * 0.5 * sv;
+            }
+
+            // Storm: color drains, the sky closes.
+            float g = dot(c, vec3(0.333));
+            c = mix(c, vec3(g) * 0.82 + vec3(0.05, 0.06, 0.08), uStorm * 0.55);
+
+            // The palette is authored in display space and passed through
+            // unconverted — write it raw so dusk stays the color it was
+            // painted, with only the additive layers riding on top.
             gl_FragColor = vec4(c, 1.0);
           }`,
       }),
@@ -204,9 +314,22 @@ export function MountainMap3D(props: Props) {
     // Surface character: wind-carved sastrugi on snow, striation on rock,
     // and a faint daylight glint — micro-relief the geometry can't afford,
     // faked in the normal before lighting runs.
-    const terrainUniforms = { uDay: { value: 1 } };
+    const hazeColor = new THREE.Color('#8ea6c8');
+    const terrainUniforms = {
+      uDay: { value: 1 },
+      uSky: { value: new THREE.Color('#27436b') },
+      uHaze: { value: hazeColor },
+      uHazeK: { value: 1 / 30000 },
+      uGlow: { value: new THREE.Color('#ff8a5e') },
+      uBand: { value: 0 },
+    };
     terrainMat.onBeforeCompile = (shader) => {
       shader.uniforms.uDay = terrainUniforms.uDay;
+      shader.uniforms.uSky = terrainUniforms.uSky;
+      shader.uniforms.uHaze = terrainUniforms.uHaze;
+      shader.uniforms.uHazeK = terrainUniforms.uHazeK;
+      shader.uniforms.uGlow = terrainUniforms.uGlow;
+      shader.uniforms.uBand = terrainUniforms.uBand;
       shader.vertexShader = shader.vertexShader
         .replace('#include <common>', '#include <common>\nvarying vec3 vWPos;')
         .replace('#include <begin_vertex>', '#include <begin_vertex>\nvWPos = (modelMatrix * vec4(position, 1.0)).xyz;');
@@ -214,6 +337,11 @@ export function MountainMap3D(props: Props) {
         .replace('#include <common>', `#include <common>
 varying vec3 vWPos;
 uniform float uDay;
+uniform vec3 uSky;
+uniform vec3 uHaze;
+uniform float uHazeK;
+uniform vec3 uGlow;
+uniform float uBand;
 float thash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 float tnoise(vec2 p){
   vec2 i = floor(p); vec2 f = fract(p); vec2 u = f * f * (3.0 - 2.0 * f);
@@ -225,9 +353,9 @@ float tnoise(vec2 p){
   float steep = 1.0 - abs(normal.y);
   vec2 pSnow = vec2(vWPos.x * 0.020, vWPos.z * 0.052);
   vec2 pRock = vec2(vWPos.x * 0.060, vWPos.y * 0.045);
-  float nS = tnoise(pSnow) + 0.5 * tnoise(pSnow * 2.7 + 13.1);
+  float nS = tnoise(pSnow) + 0.5 * tnoise(pSnow * 2.7 + 13.1) + 0.28 * tnoise(pSnow * 6.1 + 31.7);
   float nR = tnoise(pRock) + 0.5 * tnoise(pRock * 3.1 + 7.7);
-  float amt = mix(0.22, 0.42, steep);
+  float amt = mix(0.26, 0.5, steep);
   vec2 g = vec2(
     tnoise(pSnow + vec2(0.13, 0.0)) - nS * 0.66,
     tnoise(pSnow + vec2(0.0, 0.13)) - nS * 0.66
@@ -240,7 +368,23 @@ float tnoise(vec2 p){
   normal = normalize(normal + vec3(gm.x, 0.0, gm.y) * amt);
   float glint = step(0.985, thash(floor(vWPos.xz * 0.9))) * (1.0 - steep) * uDay;
   diffuseColor.rgb += glint * 0.18;
-}`);
+  // Sky bounce: snow scatters the sky back at grazing angles, which is
+  // what keeps real snowfields from ever reading as flat grey.
+  vec3 V = normalize(vViewPosition);
+  float rim = pow(1.0 - max(dot(normal, V), 0.0), 3.0);
+  float snowMask = smoothstep(0.5, 0.8, dot(diffuseColor.rgb, vec3(0.3333)));
+  diffuseColor.rgb += uSky * rim * snowMask * 0.16;
+  // Alpenglow strikes the summits first: the last light climbs the peak.
+  float blush = smoothstep(0.5, 1.0, (vWPos.y - 4750.0) / 4100.0);
+  diffuseColor.rgb += uGlow * uBand * blush * snowMask * 0.3;
+}`)
+        .replace('#include <dithering_fragment>', `#include <dithering_fragment>
+#ifdef USE_FOG
+{
+  float fh = 1.0 - exp(-pow(vFogDepth * uHazeK, 1.35));
+  gl_FragColor.rgb = mix(gl_FragColor.rgb, uHaze, min(0.9, fh));
+}
+#endif`);
       terrainMat.userData.shader = shader;
     };
     const terrain = new THREE.Mesh(tGeo, terrainMat);
@@ -262,17 +406,107 @@ float tnoise(vec2 p){
     }
     scene.add(contourGroup);
 
-    // Distant peaks as impostors — a horizon for dawn to happen behind.
-    const impostorMat = new THREE.MeshLambertMaterial({ color: '#3b4a68', flatShading: true });
-    for (const p of IMPOSTORS) {
-      const cone = new THREE.Mesh(
-        new THREE.ConeGeometry(p.r, p.alt - 4300, 7, 1),
-        impostorMat,
-      );
-      cone.position.set(p.x, 4300 + (p.alt - 4300) / 2, p.z);
-      cone.rotation.y = (p.x * 13.37) % Math.PI;
-      scene.add(cone);
+    // The far Himalaya: range upon range out to the horizon, dissolving
+    // into the sky's own color with distance. Dawn happens behind Makalu;
+    // the west holds Pumori and Cho Oyu; nothing out there is a cone.
+    const farData = buildFarRange();
+    const farGeo = new THREE.BufferGeometry();
+    farGeo.setAttribute('position', new THREE.BufferAttribute(farData.positions, 3));
+    farGeo.setAttribute('color', new THREE.BufferAttribute(farData.colors, 3));
+    farGeo.setIndex(new THREE.BufferAttribute(farData.indices, 1));
+    farGeo.computeVertexNormals();
+    const farUniforms = {
+      uHaze: { value: hazeColor },
+      uHazeK: { value: 1 / 15500 },
+    };
+    const farMat = new THREE.MeshLambertMaterial({ vertexColors: true });
+    farMat.onBeforeCompile = (shader) => {
+      shader.uniforms.uHaze = farUniforms.uHaze;
+      shader.uniforms.uHazeK = farUniforms.uHazeK;
+      shader.fragmentShader = shader.fragmentShader
+        .replace('#include <common>', '#include <common>\nuniform vec3 uHaze;\nuniform float uHazeK;')
+        .replace('#include <dithering_fragment>', `#include <dithering_fragment>
+#ifdef USE_FOG
+{
+  float fh = 1.0 - exp(-pow(vFogDepth * uHazeK, 1.35));
+  gl_FragColor.rgb = mix(gl_FragColor.rgb, uHaze, min(0.86, fh));
+}
+#endif`);
+    };
+    scene.add(new THREE.Mesh(farGeo, farMat));
+
+    // A sea of clouds fills the valleys below Base Camp: two drifting
+    // decks with parallax, dense at dawn, burning off through the day,
+    // gathering again at dusk and in storm.
+    const mkCloudDeck = (y: number, scale: number, seed: number) => {
+      const uniforms = {
+        uTime: { value: 0 },
+        uCov: { value: 0.5 },
+        uCol: { value: new THREE.Color('#dfe7f2') },
+        uOp: { value: 0.85 },
+        uSeed: { value: seed },
+      };
+      const mat = new THREE.ShaderMaterial({
+        transparent: true,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+        uniforms,
+        vertexShader:
+          'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
+        fragmentShader: `
+          varying vec2 vUv;
+          uniform float uTime; uniform float uCov; uniform vec3 uCol; uniform float uOp; uniform float uSeed;
+          float h21(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+          float n2(vec2 p){
+            vec2 i = floor(p); vec2 f = fract(p); vec2 u = f * f * (3.0 - 2.0 * f);
+            return mix(mix(h21(i), h21(i + vec2(1.0, 0.0)), u.x),
+                       mix(h21(i + vec2(0.0, 1.0)), h21(i + vec2(1.0, 1.0)), u.x), u.y);
+          }
+          float fbm(vec2 p){
+            float a = 0.5; float s = 0.0;
+            for (int k = 0; k < 4; k++) { s += a * n2(p); p = p * 2.17 + 13.7; a *= 0.5; }
+            return s;
+          }
+          void main(){
+            vec2 p = vUv * ${scale.toFixed(1)} + uSeed;
+            p.x += uTime * 0.011;
+            float n = fbm(p + fbm(p * 0.5 + uTime * 0.004) * 1.3);
+            float a = smoothstep(1.0 - uCov, 1.0 - uCov + 0.34, n);
+            vec2 e = abs(vUv - 0.5) * 2.0;
+            a *= 1.0 - smoothstep(0.7, 1.0, max(e.x, e.y));
+            float shade = 0.7 + 0.3 * smoothstep(0.2, 0.9, n);
+            gl_FragColor = vec4(uCol * shade, a * uOp);
+          }`,
+      });
+      const mesh = new THREE.Mesh(new THREE.PlaneGeometry(56000, 50000), mat);
+      mesh.rotation.x = -Math.PI / 2;
+      mesh.position.set(-2000, y, 1000);
+      mesh.renderOrder = 4;
+      scene.add(mesh);
+      return uniforms;
+    };
+    const cloudDecks = [mkCloudDeck(5010, 24, 3.7), mkCloudDeck(5120, 15, 91.3)];
+    // Storm scud: a ragged ceiling that swallows the upper mountain when
+    // the weather closes in, and does not exist otherwise.
+    const scudDeck = mkCloudDeck(8750, 9, 47.9);
+
+    // The signature: Everest's snow plume, streaming off the summit ridge.
+    const PLUME_N = 320;
+    const plumeGeo = new THREE.BufferGeometry();
+    const plumePos = new Float32Array(PLUME_N * 3);
+    const plumeAge = new Float32Array(PLUME_N);
+    const plumeLane = new Float32Array(PLUME_N);
+    for (let i = 0; i < PLUME_N; i++) {
+      plumeAge[i] = Math.pow(i / PLUME_N, 1.5);
+      plumeLane[i] = Math.sin(i * 12.9898) * 0.5 + Math.sin(i * 3.233) * 0.5;
     }
+    plumeGeo.setAttribute('position', new THREE.BufferAttribute(plumePos, 3));
+    const plumeMat = new THREE.PointsMaterial({
+      color: '#e8f0fb', size: 84, sizeAttenuation: true, map: glowTexture('#ffffff'),
+      transparent: true, opacity: 0.12, depthWrite: false, blending: THREE.AdditiveBlending,
+    });
+    const plume = new THREE.Points(plumeGeo, plumeMat);
+    scene.add(plume);
 
     // --- the route ------------------------------------------------------
     const routePts = ROUTE3.map((p) => new THREE.Vector3(p.x, p.y + 14, p.z));
@@ -311,24 +545,8 @@ float tnoise(vec2 p){
     }
     scene.add(campGroup);
 
-    // --- stars, sun disc, moon, summit glow -----------------------------
-    const starData = buildStars(38000);
-    const starGeo = new THREE.BufferGeometry();
-    {
-      const pos = new Float32Array((starData.length / 4) * 3);
-      for (let i = 0; i < starData.length / 4; i++) {
-        pos[i * 3] = starData[i * 4];
-        pos[i * 3 + 1] = starData[i * 4 + 1];
-        pos[i * 3 + 2] = starData[i * 4 + 2];
-      }
-      starGeo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-    }
-    const starMat = new THREE.PointsMaterial({
-      color: '#dfe9fb', size: 2.1, sizeAttenuation: false,
-      transparent: true, opacity: 0, depthWrite: false,
-    });
-    scene.add(new THREE.Points(starGeo, starMat));
-
+    // --- sun disc, moon, summit glow ------------------------------------
+    // (Stars live in the sky shader now — thousands of them, twinkling.)
     const sunSprite = new THREE.Sprite(
       new THREE.SpriteMaterial({
         map: glowTexture('#ffedc4'), blending: THREE.AdditiveBlending,
@@ -340,11 +558,11 @@ float tnoise(vec2 p){
 
     const moonSprite = new THREE.Sprite(
       new THREE.SpriteMaterial({
-        map: glowTexture('#d5e1f5'), blending: THREE.AdditiveBlending,
+        map: moonTexture(), blending: THREE.AdditiveBlending,
         transparent: true, depthWrite: false, opacity: 0,
       }),
     );
-    moonSprite.scale.set(3000, 3000, 1);
+    moonSprite.scale.set(1700, 1700, 1);
     scene.add(moonSprite);
 
     // The goal is the brightest thing in the scene, day or night.
@@ -369,7 +587,8 @@ float tnoise(vec2 p){
     }
     snowGeo.setAttribute('position', new THREE.BufferAttribute(snowPos, 3));
     const snowMat = new THREE.PointsMaterial({
-      color: '#e8f1fb', size: 2.6, sizeAttenuation: false,
+      color: '#e8f1fb', size: 3.4, sizeAttenuation: false,
+      map: glowTexture('#ffffff'),
       transparent: true, opacity: 0, depthWrite: false,
     });
     const snow = new THREE.Points(snowGeo, snowMat);
@@ -541,6 +760,8 @@ float tnoise(vec2 p){
 
     // --- the frame loop -------------------------------------------------
     const tmpV = new THREE.Vector3();
+    const tmpColor = new THREE.Color();
+    let lastNow = performance.now();
     const focus = new THREE.Vector3(...CAM_PRESETS[0].target);
     let raf = 0;
     const frame = () => {
@@ -557,39 +778,88 @@ float tnoise(vec2 p){
       // Light of the hour.
       const u = p.durationMs > 0 ? p.tMs / p.durationMs : 0;
       const L = sceneLight(u, stormNow);
-      skyUniforms.topC.value.set(L.skyTop);
-      skyUniforms.midC.value.set(L.skyMid);
-      skyUniforms.horC.value.set(L.horizon);
+      // Sky colors bypass the linear conversion: the dome shader writes
+      // display-space values raw, so the palette shows as authored.
+      skyUniforms.topC.value.setStyle(L.skyTop, THREE.LinearSRGBColorSpace);
+      skyUniforms.midC.value.setStyle(L.skyMid, THREE.LinearSRGBColorSpace);
+      skyUniforms.horC.value.setStyle(L.horizon, THREE.LinearSRGBColorSpace);
       const sd = sunDir(L.sunU);
       const dayness = 1 - L.darkness;
+      skyUniforms.glowC.value.setStyle(L.glow, THREE.LinearSRGBColorSpace);
+      skyUniforms.uSun.value.set(sd[0], sd[1], sd[2]);
+      skyUniforms.uStars.value = L.stars;
+      skyUniforms.uStorm.value = stormNow;
+      skyUniforms.uDay.value = dayness;
+      skyUniforms.uTime.value = now * 0.001;
+      // Low sun near the horizon: the warm mound gathers; gone by midday.
+      skyUniforms.uBand.value =
+        Math.pow(Math.max(0, 1 - sd[1] * 2.4), 2) * Math.max(0, dayness * 1.15 - 0.05);
+      // Aerial perspective targets what the sky actually renders at the
+      // horizon — same curve as the dome shader, computed here once.
+      {
+        // Ranges dissolve toward the sky but stay a shade darker and less
+        // saturated than it — silhouettes, never a wall of horizon color.
+        const hc = tmpColor.setStyle(L.horizon, THREE.LinearSRGBColorSpace);
+        const lum = hc.r * 0.35 + hc.g * 0.5 + hc.b * 0.15;
+        const ds = 0.3;
+        hazeColor.setRGB(
+          (hc.r + (lum - hc.r) * ds) * 0.86,
+          (hc.g + (lum - hc.g) * ds) * 0.86,
+          (hc.b + (lum - hc.b) * ds) * 0.88,
+        );
+      }
       sun.position.set(sd[0] * 30000, sd[1] * 30000, sd[2] * 30000);
       sun.target.position.set(0, 6500, 1000);
-      sun.color.set(L.glow).lerp(new THREE.Color('#fff7ea'), Math.min(1, sd[1] * 1.7));
-      sun.intensity = 0.12 + dayness * 2.6;
+      // Low sun goes warm amber, not blood red, and loses power — real
+      // alpenglow is a blush on the faces, never a flood.
+      sun.color.set(L.glow).lerp(tmpColor.set('#ffd9b0'), Math.min(1, 0.3 + sd[1] * 1.6));
+      sun.intensity = (0.12 + dayness * 2.6) * 1.35 * (0.55 + 0.45 * Math.min(1, sd[1] * 2.6));
       moon.position.set(-sd[0] * 22000, 14000, -sd[2] * 22000);
       moon.target.position.set(0, 6500, 1000);
       moon.intensity = L.darkness * (0.24 + L.moon * 0.22);
       hemi.color.set(L.skyMid);
       hemi.groundColor.set('#10141f');
-      hemi.intensity = 0.26 + dayness * 0.85;
-      amb.intensity = 0.16 + L.darkness * 0.16;
+      hemi.intensity = (0.26 + dayness * 0.85) * 1.2;
+      amb.intensity = 0.18 + L.darkness * 0.18;
       // Snow faintly luminous under starlight — the mountain keeps its form.
-      terrainMat.emissive.setScalar(0).lerp(new THREE.Color('#1a2540'), L.darkness);
+      terrainMat.emissive.setScalar(0).lerp(tmpColor.set('#141e38'), L.darkness);
       terrainUniforms.uDay.value = dayness;
-      moon.intensity = Math.max(moon.intensity, L.darkness * 0.45);
+      terrainUniforms.uSky.value.set(L.skyMid);
+      terrainUniforms.uGlow.value.set(L.glow);
+      terrainUniforms.uBand.value = skyUniforms.uBand.value;
+      moon.intensity = Math.max(moon.intensity, L.darkness * 0.62);
       (scene.fog as THREE.FogExp2).color.set(L.horizon);
       (scene.fog as THREE.FogExp2).density =
         0.000013 + L.haze * 0.000012 + stormNow * 0.00021;
-      starMat.opacity = L.stars * 0.9;
+      // Cloud sea: dense at dawn, burning off toward midday, back at dusk.
+      {
+        const daily = 0.5 + 0.5 * Math.cos((u - 0.03) * Math.PI * 2.3);
+        const cov = Math.min(0.8, 0.3 + 0.3 * daily + stormNow * 0.24);
+        const cloudLum = 0.16 + dayness * 0.84;
+        for (let ci = 0; ci < cloudDecks.length; ci++) {
+          const cd = cloudDecks[ci];
+          cd.uTime.value = now * 0.001 + ci * 40;
+          cd.uCov.value = cov - ci * 0.08;
+          cd.uCol.value
+            .setRGB(0.86 * cloudLum, 0.9 * cloudLum, 0.97 * cloudLum)
+            .lerp(tmpColor.set(L.glow), skyUniforms.uBand.value * 0.35);
+          cd.uOp.value = 0.66 + stormNow * 0.2;
+        }
+        // The scud ceiling belongs to the storm alone.
+        scudDeck.uTime.value = now * 0.0014 + 200;
+        scudDeck.uCov.value = stormNow * 0.62;
+        scudDeck.uCol.value.setRGB(0.5 * cloudLum + 0.06, 0.53 * cloudLum + 0.065, 0.6 * cloudLum + 0.075);
+        scudDeck.uOp.value = stormNow * 0.85;
+      }
       sunSprite.position.set(sd[0] * 40000, Math.max(800, sd[1] * 40000), sd[2] * 40000);
       // The bloom shrinks and dims as the sun sinks — no red wall at dusk.
       const sunScale = 3800 + Math.min(1, sd[1] * 2.4) * 5600;
       sunSprite.scale.set(sunScale, sunScale, 1);
-      sunSprite.material.opacity = Math.max(0, Math.min(0.9, sd[1] * 2.4)) * dayness;
+      sunSprite.material.opacity = Math.max(0, Math.min(0.72, sd[1] * 2.0)) * dayness;
       moonSprite.position.set(-sd[0] * 36000, 17000, -sd[2] * 36000);
       moonSprite.material.opacity = L.moon * 0.9;
-      summitGlow.material.opacity = 0.16 + L.darkness * 0.55;
-      const sgScale = 380 + L.darkness * 260;
+      summitGlow.material.opacity = 0.14 + L.darkness * 0.3;
+      const sgScale = 360 + L.darkness * 140;
       summitGlow.scale.set(sgScale, sgScale, 1);
       contourGroup.visible = true;
 
@@ -619,6 +889,30 @@ float tnoise(vec2 p){
         }
         arr.needsUpdate = true;
       }
+
+      // The plume streams leeward off the summit, longer and wilder in wind.
+      {
+        const dt = Math.min(0.1, (now - lastNow) * 0.001);
+        const rate = 0.05 + stormNow * 0.09;
+        const len = 950 + stormNow * 1500;
+        const arr = plumeGeo.getAttribute('position') as THREE.BufferAttribute;
+        for (let i = 0; i < PLUME_N; i++) {
+          let a = plumeAge[i] + dt * rate * (0.7 + (plumeLane[i] + 1) * 0.3);
+          if (a > 1) a -= 1;
+          plumeAge[i] = a;
+          const spread = a * a * 320;
+          arr.setXYZ(
+            i,
+            WP3.SUMMIT[0] + 60 + a * len,
+            WP3.SUMMIT[1] + 40 + Math.sin(a * 5.2 + plumeLane[i] * 8) * (14 + a * 90) - a * a * 260,
+            WP3.SUMMIT[2] - 30 + a * len * 0.22 + plumeLane[i] * spread,
+          );
+        }
+        arr.needsUpdate = true;
+        plumeMat.opacity = (0.05 + dayness * 0.09 + stormNow * 0.15) * (1 - white);
+        plumeMat.size = 62 + stormNow * 60;
+      }
+      lastNow = now;
 
       // Team lights.
       const px = renderer.domElement.clientHeight || 1;
@@ -658,10 +952,10 @@ float tnoise(vec2 p){
         dotSprites[i].scale.set(dotScale, dotScale, 1);
         dotSprites[i].material.opacity = 0.25 + visMul * 0.75;
         // Brightness is condition; warmth is a headlamp after dark.
-        haloMats[i].opacity = visMul * (0.28 + lampAmt * 0.5);
+        haloMats[i].opacity = visMul * (0.24 + lampAmt * 0.42);
         haloMats[i].color.setStyle(lampAmt > 0.4 ? '#ffdf9e' : '#ffffff');
         const beamM = beamMeshes[i].material as THREE.MeshBasicMaterial;
-        beamM.opacity = wiped ? 0 : visMul * (0.12 + L.darkness * 0.42);
+        beamM.opacity = wiped ? 0 : visMul * (0.1 + L.darkness * 0.36);
         beamMeshes[i].lookAt(camera.position.x, beamMeshes[i].getWorldPosition(tmpV).y, camera.position.z);
         if (!wiped) {
           leadFrac = Math.max(leadFrac, pos);
@@ -804,7 +1098,7 @@ float tnoise(vec2 p){
           tmpV.copy(teamGroups[i].position).project(camera);
           const lx = ((tmpV.x + 1) / 2) * wrap.clientWidth;
           const ly = ((-tmpV.y + 1) / 2) * wrap.clientHeight;
-          const cell = `${Math.round(lx / 46)}:${Math.round(ly / 22)}`;
+          const cell = `${Math.round(lx / 58)}:${Math.round(ly / 25)}`;
           const tWiped = states[i]?.wiped ?? false;
           const ok =
             tmpV.z <= 1 && !cells.has(cell) && white < 0.6 && !tWiped &&

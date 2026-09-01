@@ -291,7 +291,7 @@ export function heightAt(x: number, z: number): number {
 // ---------------------------------------------------------------------------
 
 export const GRID = {
-  x0: -5400, x1: 2500, z0: -1700, z1: 3950, nx: 440, nz: 320,
+  x0: -5400, x1: 2500, z0: -1700, z1: 3950, nx: 520, nz: 370,
 };
 
 function hex(c: string): [number, number, number] {
@@ -463,7 +463,7 @@ export function buildContours(t: TerrainData): ContourLevel[] {
           }
         }
         if (pts.length === 2) {
-          segs.push(pts[0][0], level + 14, pts[0][1], pts[1][0], level + 14, pts[1][1]);
+          segs.push(pts[0][0], level + 8, pts[0][1], pts[1][0], level + 8, pts[1][1]);
         }
       }
     }
@@ -476,9 +476,9 @@ export function buildContours(t: TerrainData): ContourLevel[] {
 // Skyline impostors, star dome, sun path, camera presets.
 // ---------------------------------------------------------------------------
 
-/** Distant peaks — low-detail shapes that give the sky a horizon. */
+/** Distant peaks — silhouettes that give the sky a horizon. */
 export const IMPOSTORS = [
-  { name: 'Pumori', x: -5300, z: 1500, alt: 7161, r: 1150 },
+  { name: 'Pumori', x: -6300, z: 1200, alt: 7161, r: 1150 },
   { name: 'Ama Dablam', x: -1600, z: 5600, alt: 6812, r: 900 },
   { name: 'Makalu', x: 5600, z: 2600, alt: 8485, r: 1900 }, // dawn comes up here
   { name: 'Cho Oyu', x: -7200, z: -900, alt: 8188, r: 2100 },
@@ -486,6 +486,149 @@ export const IMPOSTORS = [
   { name: 'Baruntse', x: 3400, z: 4800, alt: 7129, r: 1100 },
   { name: 'Taboche', x: -6400, z: 3800, alt: 6495, r: 1000 },
 ];
+
+/**
+ * The named horizon plus anonymous ranges: the Himalaya is a sea of
+ * mountains, not seven cones on a plain. These fill the gaps between the
+ * named silhouettes so every compass direction has a skyline.
+ */
+export const FAR_PEAKS = [
+  ...IMPOSTORS,
+  { name: '', x: 1800, z: -9500, alt: 7050, r: 1700 },
+  { name: '', x: -3400, z: -12500, alt: 6900, r: 2200 },
+  { name: '', x: 7800, z: -6800, alt: 7350, r: 1900 },
+  { name: '', x: -9800, z: -6200, alt: 6750, r: 2000 },
+  { name: '', x: -13500, z: 3400, alt: 6600, r: 2100 },
+  { name: '', x: -8600, z: 8800, alt: 6580, r: 1800 },
+  { name: '', x: 5400, z: 9600, alt: 6880, r: 1900 },
+  { name: '', x: 12800, z: -2400, alt: 7500, r: 2400 },
+  { name: '', x: -2400, z: 12800, alt: 6400, r: 2300 },
+  { name: '', x: 16500, z: 8200, alt: 7300, r: 2600 },
+];
+
+/**
+ * The far Himalaya heightfield. Inside the hero grid it ducks below the
+ * main terrain; at the boundary it continues the hero edge downhill so
+ * there is never a trench; beyond, ridged noise with a NW–SE structural
+ * grain builds range upon range out to the horizon, anchored by the
+ * named peaks.
+ */
+export function farHeightAt(x: number, z: number): number {
+  const cx = Math.min(Math.max(x, GRID.x0), GRID.x1);
+  const cz = Math.min(Math.max(z, GRID.z0), GRID.z1);
+  const dOut = Math.hypot(x - cx, z - cz);
+  if (dOut < 1e-6) return 4200;
+  // Ridged noise: fold value noise into sharp crests, two octaves, with
+  // the domain skewed so ranges run with the Himalaya's grain.
+  const sx = x * 0.82 + z * 0.42;
+  const sz = z * 0.86 - x * 0.30;
+  const r1 = 1 - Math.abs(vnoise(sx, sz, 3100) * 2 - 1);
+  const r2 = 1 - Math.abs(vnoise(sx + 913, sz + 411, 1350) * 2 - 1);
+  const rangeMask = Math.pow(vnoise(x - 511, z + 733, 8200), 1.5);
+  const dist = Math.hypot(x, z);
+  const farAmp = (950 + Math.min(1, dist / 22000) * 1500) * 2.1;
+  const base = 4150 + (vnoise(x + 31, z - 87, 6200) - 0.5) * 650;
+  let h = base + (r1 * 0.66 + r2 * 0.34) * rangeMask * farAmp;
+  for (const p of FAR_PEAKS) {
+    const t = Math.max(0, 1 - Math.hypot(x - p.x, z - p.z) / (p.r * 2.1));
+    if (t > 0) {
+      const serr = 0.84 + 0.16 * r2;
+      h = Math.max(h, 4300 + (p.alt - 4300) * Math.pow(t, 1.55) * serr);
+    }
+  }
+  const t = Math.min(1, dOut / 1000);
+  const edgeH = heightAt(cx, cz) - 30;
+  return edgeH * (1 - t) + h * (t * t * (3 - 2 * t));
+}
+
+const FAR_ALB = {
+  snow: hex('#dfe9f6'), snowHi: hex('#edf3fb'),
+  rock: hex('#46506b'),
+  valley: hex('#5d5a52'), valleyB: hex('#6c6a61'),
+};
+
+function farAlbedoAt(x: number, z: number, y: number, slopeDeg: number): [number, number, number] {
+  const n = vnoise(x + 77, z - 13, 1100);
+  const snowline = 5250 + n * 350;
+  if (y < snowline) return mix(FAR_ALB.valley, FAR_ALB.valleyB, n);
+  if (slopeDeg > 52) return mix(FAR_ALB.rock, FAR_ALB.snow, Math.max(0, n - 0.55));
+  return mix(FAR_ALB.snow, FAR_ALB.snowHi, 0.2 + n * 0.6);
+}
+
+export interface FarRangeData {
+  positions: Float32Array;
+  colors: Float32Array;
+  indices: Uint32Array;
+}
+
+/** Build the far-range mesh: coarse, jittered, AO-shaded, huge. */
+export function buildFarRange(): FarRangeData {
+  const fx0 = -30000, fx1 = 26000, fz0 = -24000, fz1 = 26000;
+  const nx = 230, nz = 205;
+  const dx = (fx1 - fx0) / (nx - 1);
+  const dz = (fz1 - fz0) / (nz - 1);
+  const positions = new Float32Array(nx * nz * 3);
+  const colors = new Float32Array(nx * nz * 3);
+  const heights = new Float32Array(nx * nz);
+  for (let j = 0; j < nz; j++) {
+    for (let i = 0; i < nx; i++) {
+      const x = fx0 + i * dx;
+      const z = fz0 + j * dz;
+      const k = j * nx + i;
+      const edge = i === 0 || j === 0 || i === nx - 1 || j === nz - 1;
+      const h1 = Math.sin(i * 127.1 + j * 311.7) * 43758.5453;
+      const h2 = Math.sin(i * 269.5 + j * 183.3) * 28001.8384;
+      const xj = edge ? x : x + (h1 - Math.floor(h1) - 0.5) * 0.8 * dx;
+      const zj = edge ? z : z + (h2 - Math.floor(h2) - 0.5) * 0.8 * dz;
+      const y = farHeightAt(xj, zj);
+      positions[k * 3] = xj;
+      positions[k * 3 + 1] = y;
+      positions[k * 3 + 2] = zj;
+      heights[k] = y;
+      const gx = (farHeightAt(xj + dx * 0.5, zj) - farHeightAt(xj - dx * 0.5, zj)) / dx;
+      const gz = (farHeightAt(xj, zj + dz * 0.5) - farHeightAt(xj, zj - dz * 0.5)) / dz;
+      const slope = (Math.atan(Math.hypot(gx, gz)) * 180) / Math.PI;
+      const [r, g, b] = farAlbedoAt(xj, zj, y, slope);
+      colors[k * 3] = r;
+      colors[k * 3 + 1] = g;
+      colors[k * 3 + 2] = b;
+    }
+  }
+  // Concavity AO, as on the hero terrain — valleys hold shadow.
+  for (let j = 0; j < nz; j++) {
+    for (let i = 0; i < nx; i++) {
+      const k = j * nx + i;
+      let sum = 0;
+      let cnt = 0;
+      for (const [di, dj] of [[-1, 0], [1, 0], [0, -1], [0, 1], [-1, -1], [1, 1], [-1, 1], [1, -1]]) {
+        const ii = i + di;
+        const jj = j + dj;
+        if (ii < 0 || jj < 0 || ii >= nx || jj >= nz) continue;
+        sum += heights[jj * nx + ii];
+        cnt++;
+      }
+      if (!cnt) continue;
+      const occ = Math.max(0, Math.min(1, (sum / cnt - heights[k]) / 420));
+      const f = 1 - occ * 0.3;
+      colors[k * 3] *= f;
+      colors[k * 3 + 1] *= f;
+      colors[k * 3 + 2] *= f;
+    }
+  }
+  const indices = new Uint32Array((nx - 1) * (nz - 1) * 6);
+  let q = 0;
+  for (let j = 0; j < nz - 1; j++) {
+    for (let i = 0; i < nx - 1; i++) {
+      const a = j * nx + i;
+      const b = a + 1;
+      const c = a + nx;
+      const d = c + 1;
+      indices[q++] = a; indices[q++] = c; indices[q++] = b;
+      indices[q++] = b; indices[q++] = c; indices[q++] = d;
+    }
+  }
+  return { positions, colors, indices };
+}
 
 /** Deterministic star dome: [x, y, z, size01] on a big sphere. */
 export function buildStars(radius: number): Float32Array {
