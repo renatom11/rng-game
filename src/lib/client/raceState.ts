@@ -190,6 +190,34 @@ export interface TeamLiveState {
   deaths: (ClimberDeath | null)[];
 }
 
+/**
+ * True when a team was sitting still just before it started climbing —
+ * it has broken camp, rather than being partway up an existing push.
+ */
+function leftCampJustNow(
+  snap: JourneySnapshot,
+  teamIdx: number,
+  tMs: number,
+  lookback: number,
+): boolean {
+  const track = snap.displayTrack;
+  if (tMs < lookback * 4) return false;
+  const a = interpAt(track.tMs, track.pos[teamIdx], tMs - lookback * 4);
+  const b = interpAt(track.tMs, track.pos[teamIdx], tMs - lookback);
+  // Scaled to the same per-lookback rate that counts as "moving" (0.0012),
+  // over the three lookbacks this window spans. Held at a flat 0.0008 it
+  // demanded four times the stillness of a standing team and effectively
+  // never fired, which starved every reason downstream of it.
+  return Math.abs(b - a) < 0.0018;
+}
+
+/** True shortly after a storm window closes — the window everyone waits for. */
+function justCleared(snap: JourneySnapshot, tMs: number): boolean {
+  return (snap.storms ?? []).some(
+    (st) => tMs > st.endMs && tMs - st.endMs < 600_000,
+  );
+}
+
 /** Fold events up to t into per-team live state (activity, roster, edge). */
 export function teamStatesAt(
   snap: JourneySnapshot,
@@ -264,21 +292,56 @@ export function teamStatesAt(
     );
     const d = pos - prev;
     const thresh = 0.0012;
+    const stormNow = (snap.storms ?? []).some(
+      (st) => tMs >= st.startMs && tMs <= st.endMs,
+    );
     if (d > thresh) {
-      // keep a route label if one is current, else the generic moving verb
-      if (!s.activity.startsWith('On ')) s.activity = jt.motion.up;
+      // keep a route label if one is current, else say why they are moving
+      if (!s.activity.startsWith('On ')) {
+        const ub = jt.motion.upBecause;
+        const ready = metersAt(snap, i, tMs).readiness;
+        const brokeCamp = leftCampJustNow(snap, i, tMs, lookback);
+        if (!ub) s.activity = jt.motion.up;
+        else if (tMs >= snap.pushStartMs)
+          s.activity = ready < 20 && ub.pushSpent ? ub.pushSpent : ub.push;
+        // "The window is open" belongs to a squad that actually broke camp
+        // when the sky cleared — without that, it claimed every squad already
+        // mid-climb for ten minutes after every storm and starved the rest.
+        else if (justCleared(snap, tMs) && brokeCamp) s.activity = ub.window;
+        else if (ready < 30 && ub.spent) s.activity = ub.spent;
+        else if (brokeCamp) s.activity = ub.afterRest;
+        else s.activity = ub.rotation;
+      }
       s.motionKind = 'up';
     } else if (d < -thresh) {
-      // Name where they are headed: an unexplained descent is the single
-      // most confusing thing on the board ("why are they going DOWN?").
+      // Name where they are headed AND why: an unexplained descent is the
+      // single most confusing thing on the board ("why are they going
+      // DOWN?"). The mountain's own priority order decides the reason.
       const below = jt.waypointAt(Math.max(0, pos - 0.005));
-      s.activity = jt.motion.downTo ? jt.motion.downTo(below.label) : jt.motion.down;
+      const db = jt.motion.downBecause;
+      if (!db) {
+        s.activity = jt.motion.downTo ? jt.motion.downTo(below.label) : jt.motion.down;
+      } else {
+        const m = metersAt(snap, i, tMs);
+        // Scaled to the race, not a flat quarter hour: in a 30-minute race
+        // that constant claimed half the timeline, so a loss explained every
+        // descent a team made for the rest of its climb.
+        const grieving = dtStep * 60;
+        const lostSomeone = s.deaths.some((dd) => dd !== null && tMs - dd.tMs < grieving);
+        if (stormNow) s.activity = db.storm(below.label);
+        else if (m.o2 <= 20) s.activity = db.oxygen(below.label);
+        else if (m.food <= 22) s.activity = db.food(below.label);
+        else if (lostSomeone) s.activity = db.shortHanded(below.label);
+        // Readiness is the number that actually turns a squad around, so it
+        // is what "spent" reports — energy alone missed descents driven by a
+        // squad that was merely out of everything at once.
+        else if (m.readiness < 34 || m.energy <= 25) s.activity = db.spent(below.label);
+        else s.activity = db.acclimatize(below.label);
+      }
       s.motionKind = 'down';
     } else {
       const wp = jt.waypointAt(pos + 0.015);
-      const inStorm =
-        jt.motion.holdingStorm !== undefined &&
-        (snap.storms ?? []).some((st) => tMs >= st.startMs && tMs <= st.endMs);
+      const inStorm = jt.motion.holdingStorm !== undefined && stormNow;
       if (inStorm) {
         s.activity = jt.motion.holdingStorm!(Math.abs(wp.frac - pos) < 0.02 ? wp.label : 'altitude');
         s.motionKind = 'storm';

@@ -1025,16 +1025,19 @@ float tnoise(vec2 p){
       for (let i = 0; i < teamGroups.length; i++) {
         const pos = displayPosAt(p.snap, i, p.tMs);
         let [x, y, z] = posToXYZ(pos);
+        // A team that has topped out leaves the mountain: its light, beam
+        // and tag are removed rather than parked on the summit, where a
+        // growing pile of dots buried the peak it just earned. The summit
+        // label carries the count, and the rail carries the arrival time.
         const parked = pos >= 0.9999;
-        if (parked) {
-          // Down the northwest shoulder in arrival order, feet on snow,
-          // spaced so constant-size chips stay separate even from afar.
-          const k = Math.max(0, summitOrder.indexOf(i));
-          x += -k * 112 - 16;
-          z += -k * 62 - 9;
-          y = heightAt(x, z);
-        }
         const grp = teamGroups[i];
+        grp.visible = !parked;
+        grp.userData.parked = parked;
+        if (parked) {
+          (trailLines[i].material as THREE.LineBasicMaterial).opacity = 0;
+          tagEls[i].style.opacity = '0';
+          continue;
+        }
         grp.position.set(x, y + 26, z);
         grp.userData.parked = parked;
         const st = states[i];
@@ -1139,6 +1142,7 @@ float tnoise(vec2 p){
         // fits the spread — the camera itself is a leaderboard readout.
         let cx = 0, cy = 0, cz = 0, cn = 0;
         for (const g of teamGroups) {
+          if (!g.visible) continue; // summited teams have left the mountain
           cx += g.position.x; cy += g.position.y; cz += g.position.z; cn++;
         }
         if (cn > 0) {
@@ -1186,6 +1190,7 @@ float tnoise(vec2 p){
         const cells = new Set<string>();
         for (let i = 0; i < teamGroups.length; i++) {
           const el = tagEls[i];
+          if (!teamGroups[i].visible) { el.style.opacity = '0'; continue; }
           tmpV.copy(teamGroups[i].position).project(camera);
           const lx = ((tmpV.x + 1) / 2) * wrap.clientWidth;
           const ly = ((-tmpV.y + 1) / 2) * wrap.clientHeight;
@@ -1207,6 +1212,16 @@ float tnoise(vec2 p){
         const [x, y, z] = WP3[l.id];
         tmpV.set(x, y + 30, z).project(camera);
         const el = labelEls[i];
+        // The summit keeps the tally the vanished dots used to carry.
+        if (l.id === 'SUMMIT') {
+          const n = summitOrder.length;
+          const line = n === 0 ? l.alt : `${n} summited`;
+          if (el.dataset.line !== line) {
+            el.dataset.line = line;
+            const altEl = el.querySelector('.m3d-label-alt');
+            if (altEl) altEl.textContent = line;
+          }
+        }
         const behind = tmpV.z > 1;
         const lx = ((tmpV.x + 1) / 2) * wrap.clientWidth;
         const ly = ((-tmpV.y + 1) / 2) * wrap.clientHeight;

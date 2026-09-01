@@ -369,12 +369,22 @@ export function heightAt(x: number, z: number): number {
 
   // Faceting noise: calm on the high ridge, chaotic in the Icefall. Cells
   // stay several grid steps wide — near-Nyquist noise reads as spikes.
+  // The glacier floor is not a billiard table: long, low swells keep the
+  // low ground from reading as a flat pan with a rectangular edge.
+  const valley = Math.max(0, Math.min(1, (5750 - bones) / 800));
+  // ...and it drains away from the massif, the way the Khumbu Glacier does,
+  // so the low ground reads as a valley floor rather than a table top.
+  const grade = Math.max(0, Math.min(1, (Math.hypot(x, z) - 2800) / 6000)) * 420;
+  const swell =
+    ((vnoise(wx + 401, wz - 233, 2600) - 0.5) * 150 +
+      (vnoise(wx - 877, wz + 611, 1150) - 0.5) * 70 - grade) * valley;
+
   const amp = 18 * (1 - alt01 * 0.85) + 55 * ice;
   const n =
     (vnoise(wx, wz, 920) - 0.5) * 0.65 +
     (vnoise(wx + 913, wz - 417, 330) - 0.5) * 0.35 +
     (vnoise(wx - 311, wz + 731, 150) - 0.5) * 0.45 * ice;
-  let h = bones + flute + erosion + n * amp;
+  let h = bones + flute + erosion + swell + n * amp;
   // The climbing line lies ON the mountain: blend the surface to the route
   // altitude in a corridor around it, so lights sit on snow, not in air.
   const [d, ra] = routePull(x, z);
@@ -699,7 +709,10 @@ export function farHeightAt(x: number, z: number): number {
   const cx = Math.min(Math.max(x, GRID.x0), GRID.x1);
   const cz = Math.min(Math.max(z, GRID.z0), GRID.z1);
   const dOut = Math.hypot(x - cx, z - cz);
-  if (dOut < 1e-6) return 4200;
+  // Inside the hero rectangle the far mesh simply mirrors the hero surface
+  // a few metres below it. Diving to a flat floor instead left the boundary
+  // triangles standing as a cliff — the plinth the massif appeared to sit on.
+  if (dOut < 1e-6) return heightAt(x, z) - 8;
   // Ridged noise: fold value noise into sharp crests, two octaves, with
   // the domain skewed so ranges run with the Himalaya's grain.
   const sx = x * 0.82 + z * 0.42;
@@ -708,7 +721,11 @@ export function farHeightAt(x: number, z: number): number {
   const r2 = 1 - Math.abs(vnoise(sx + 913, sz + 411, 1350) * 2 - 1);
   const rangeMask = Math.pow(vnoise(x - 511, z + 733, 8200), 1.5);
   const dist = Math.hypot(x, z);
-  const farAmp = (950 + Math.min(1, dist / 22000) * 1500) * 2.1;
+  // Ranges grow with distance from the massif. Without this ramp the far
+  // terrain reaches full height the instant it leaves the hero grid, and
+  // the grid reads as a flat pan sunk inside a ring of peaks.
+  const grow = Math.min(1, dOut / 15000);
+  const farAmp = (950 + Math.min(1, dist / 22000) * 1500) * 2.1 * (grow * grow * (3 - 2 * grow));
   const base = 4150 + (vnoise(x + 31, z - 87, 6200) - 0.5) * 650;
   let h = base + (r1 * 0.66 + r2 * 0.34) * rangeMask * farAmp;
   for (const p of FAR_PEAKS) {
@@ -718,8 +735,13 @@ export function farHeightAt(x: number, z: number): number {
       h = Math.max(h, 4300 + (p.alt - 4300) * Math.pow(t, 1.55) * serr);
     }
   }
-  const t = Math.min(1, dOut / 1000);
-  const edgeH = heightAt(cx, cz) - 30;
+  // The hero grid is a rectangle sitting ~600 m above the far terrain's
+  // base. Blended over a kilometre that edge reads as a floating slab, so
+  // the transition is a 4 km apron instead: the massif's outwash plain
+  // running down into the valley system, which is what is actually there.
+  const t = Math.min(1, dOut / 4000);
+  // Tucked a hair under the hero mesh so the two never z-fight at the seam.
+  const edgeH = heightAt(cx, cz) - 8;
   return edgeH * (1 - t) + h * (t * t * (3 - 2 * t));
 }
 

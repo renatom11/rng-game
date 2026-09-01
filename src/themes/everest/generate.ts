@@ -1,7 +1,7 @@
 import { forkRng } from '@/engine/prng';
 import { generateCore } from '@/engine/generate';
-import { buildDisplayTrack } from './rotations';
-import { buildMeters, recomputeReadiness } from './meters';
+import { buildDisplayTrack, summitBidStartMs } from './rotations';
+import { createTeamMeters, recomputeReadiness, type TeamMeters } from './meters';
 import { assignStyles, buildFate, buildTraversals, buildWeather } from './decorate';
 import { assignColors, buildSquads } from './names';
 import { buildEvents } from './events';
@@ -52,6 +52,20 @@ export function generateEverest(
 
   const weather = buildWeather(forkRng(seedHex, 'weather'), durationMs);
 
+  // The climb and the squads' condition are ONE simulation, stepped together:
+  // the choreography asks each team how much it has left before deciding where
+  // that team goes next, and reports back the step it settled on. So the
+  // readiness bar is a cause, not a caption — a spent squad sits the storm
+  // out, gets turned around short of the height it wanted, drops further to
+  // recover, and near the floor stops climbing until rest has bought it
+  // something back. (Built after it instead, the number on the card and the
+  // behaviour it was supposed to explain drifted apart by up to 99 points.)
+  //
+  // Readings only ever depend on steps already committed, so there is no
+  // circularity — and none of it can touch `core`: the ending was drawn
+  // before any of this ran.
+  const metersRng = forkRng(seedHex, 'meters');
+  const teamMeters: TeamMeters[] = [];
   const choreo = buildDisplayTrack(
     forkRng(seedHex, 'rotations'),
     core,
@@ -60,29 +74,22 @@ export function generateEverest(
     fate.falls,
     weather.storms,
     styles,
+    (team) => {
+      const m = createTeamMeters(
+        metersRng,
+        durationMs,
+        core.pushStartMs,
+        summitBidStartMs(durationMs),
+      );
+      teamMeters[team] = m;
+      return m;
+    },
+    fate.wipeouts,
   );
   // Beats stay generation-side (the event layer narrates them); the stored
   // track keeps its lean shape.
   const displayTrack = { tMs: choreo.tMs, pos: choreo.pos };
-
-  // Freeze wiped teams where they were lost: the mountain keeps them.
-  for (const w of fate.wipeouts) {
-    const row = displayTrack.pos[w.teamIdx];
-    let frozen: number | null = null;
-    for (let i = 0; i < displayTrack.tMs.length; i++) {
-      if (displayTrack.tMs[i] >= w.tMs) {
-        if (frozen === null) frozen = row[Math.max(0, i - 1)];
-        row[i] = frozen;
-      }
-    }
-  }
-
-  const meters = buildMeters(
-    forkRng(seedHex, 'meters'),
-    displayTrack,
-    durationMs,
-    core.pushStartMs,
-  );
+  const meters = teamMeters.map((m) => m.rows);
 
   const traversals = buildTraversals(
     forkRng(seedHex, 'decor'),

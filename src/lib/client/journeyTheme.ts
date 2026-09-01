@@ -35,6 +35,29 @@ export interface JourneyTheme {
     preparing: string;
     /** stationary during a storm window, e.g. "Waiting out the storm at Camp II" */
     holdingStorm?: (waypoint: string) => string;
+    /** Movement with its reason attached, most urgent cause first. */
+    upBecause?: {
+      push: string;
+      /**
+       * Climbing anyway on an empty tank. Summit day and the closing window
+       * are committed efforts — the field goes up ready or not — so without
+       * these two lines a squad at single-digit readiness still gaining
+       * ground reads as the bar being ignored rather than as the drama it is.
+       */
+      pushSpent?: string;
+      spent?: string;
+      window: string;
+      afterRest: string;
+      rotation: string;
+    };
+    downBecause?: {
+      storm: (waypoint: string) => string;
+      oxygen: (waypoint: string) => string;
+      food: (waypoint: string) => string;
+      spent: (waypoint: string) => string;
+      shortHanded: (waypoint: string) => string;
+      acclimatize: (waypoint: string) => string;
+    };
   };
   statusLabels: Record<ClimberStatus, string>;
   /** 7 labels in meter order: o2, food, rope, med, energy, morale, accl */
@@ -75,6 +98,25 @@ export const EVEREST_JOURNEY: JourneyTheme = {
     holding: 'Holding position',
     preparing: 'Preparing at Base Camp',
     holdingStorm: (w) => `Waiting out the storm at ${w}`,
+    // Movement should never be unexplained: every climb and every descent
+    // says why it is happening, in the order the mountain would rank the
+    // reasons. Storms and empty tanks beat routine acclimatization.
+    upBecause: {
+      push: 'Climbing — the summit push is on',
+      pushSpent: 'Climbing — on the ridge and running on empty',
+      window: 'Climbing — the weather window is open',
+      afterRest: 'Climbing — rested and moving up',
+      spent: 'Climbing — pushing on with little left',
+      rotation: 'Climbing — carrying the next rotation higher',
+    },
+    downBecause: {
+      storm: (w) => `Down to ${w} — getting below the storm`,
+      oxygen: (w) => `Down to ${w} — out of bottled oxygen`,
+      food: (w) => `Down to ${w} — resupplying food and fuel`,
+      spent: (w) => `Down to ${w} — the squad is spent`,
+      shortHanded: (w) => `Down to ${w} — regrouping after a loss`,
+      acclimatize: (w) => `Down to ${w} — sleeping low to acclimatize`,
+    },
   },
   statusLabels: {
     climbing: 'climbing',
