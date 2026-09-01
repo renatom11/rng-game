@@ -177,7 +177,16 @@ export function MountainMap3D(props: Props) {
     controls.screenSpacePanning = false;
     controls.panSpeed = 0.7;
     controls.rotateSpeed = 0.62;
-    controls.zoomSpeed = 0.72;
+    // One notch is 5% of the standoff at three's default zoomSpeed of 1, so
+    // crossing the full range took about sixty of them. The dolly is already
+    // multiplicative, so a bigger number stays proportional — it just stops
+    // the wheel feeling disconnected from the mountain.
+    controls.zoomSpeed = 2.1;
+    // Zoom toward whatever is under the pointer. Without this the dolly runs
+    // along the camera-to-target axis, and in ambient mode that target is a
+    // moving blend of the team centroid and the summit — so pointing at a
+    // camp and scrolling walked you somewhere else entirely.
+    controls.zoomToCursor = true;
     controls.autoRotate = !reduced;
     controls.autoRotateSpeed = 0.32;
 
@@ -802,6 +811,11 @@ float tnoise(vec2 p){
     let lastInteract = -1e9;
     const onStart = () => {
       lastInteract = performance.now();
+      // A running tween overwrites camera.position every frame, so until it
+      // finished the wheel did nothing at all — up to three seconds of dead
+      // input after a preset button or the finale pull-back. Taking hold of
+      // the camera cancels the move it was making.
+      tween = null;
       if (modeRef.current !== 'manual') setMode('manual');
     };
     controls.addEventListener('start', onStart);
@@ -871,14 +885,18 @@ float tnoise(vec2 p){
       for (const st of propsRef.current.snap.storms ?? []) {
         const len = st.endMs - st.startMs;
         const edge = Math.max(2000, Math.min(60_000, len * 0.2));
-        best = Math.max(
-          best,
-          Math.min(
-            1,
-            Math.max(0, (tMs - (st.startMs - edge)) / edge),
-            Math.max(0, (st.endMs + edge - tMs) / edge),
-          ),
+        // Ramp in, ramp out — and an arc in between. This used to be pinned at
+        // exactly 1.0 across the whole storm body, which is 4-24% of a race, so
+        // every coefficient downstream was authored for a crest that was in
+        // fact a long plateau. Real weather has a worst hour.
+        const ramp = Math.min(
+          1,
+          Math.max(0, (tMs - (st.startMs - edge)) / edge),
+          Math.max(0, (st.endMs + edge - tMs) / edge),
         );
+        const through = Math.max(0, Math.min(1, (tMs - st.startMs) / Math.max(1, len)));
+        const arc = 0.72 + 0.28 * Math.sin(Math.PI * through);
+        best = Math.max(best, ramp * arc);
       }
       return best;
     };
