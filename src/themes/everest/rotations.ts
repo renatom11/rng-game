@@ -1,5 +1,5 @@
 import type { CoreTimeline } from '@/engine/types';
-import { HOLD_P, PUSH_U, progressAt } from '@/engine/types';
+import { HOLD_P, progressAt } from '@/engine/types';
 import type { RNG } from '@/engine/prng';
 import { NODES, nodeById } from './route';
 
@@ -35,7 +35,10 @@ export function sparseTimes(durationMs: number, extraMs: number[] = []): number[
 }
 
 const C4_FRAC = nodeById.get('C4')!.frac; // 0.70 in display space
-const COL_APPROACH_U = 0.78; // from here, converge on the hold point
+const COL_APPROACH_U = 0.78; // from here, the field breaks for the Col
+
+/** Parked at the Col: reached Camp IV, not yet committed to the ridge. */
+const COL_PARK = C4_FRAC - 0.002;
 
 /**
  * When the closing window opens: rotations are over, and the field starts
@@ -230,12 +233,19 @@ export function buildDisplayTrack(
 
   // The earliest summiter anchors the summit-push departure stagger.
   const stMin = Math.min(...core.summitTimesMs);
+  const stSpan = Math.max(1, Math.max(...core.summitTimesMs) - stMin);
+  const colOpenMs = COL_APPROACH_U * durationMs;
+  // The ridge ease's peak slope is 1.45x(1 - C4_FRAC) per unit of local time.
+  // Hold it to 60% of the per-step catch-up cap so the drawn climb is never
+  // clipped — a clipped climb would have to teleport at the summit instant to
+  // keep the arrival exact.
+  const minRidgeMs = ((1.45 * (1 - C4_FRAC)) / (pushCatch * 0.6)) * step;
 
   for (let team = 0; team < n; team++) {
     const cycles = buildCycles(rng, durationMs, team, n, route.forceShallow ?? false);
     // Per-team departure texture for the push (drawn here, outside the time
     // loop, so rng consumption stays deterministic per team).
-    const departWobble = 0.5 + 0.12 * (rng() - 0.5);
+    const colJitter = rng();
 
     // Weather decisions: does this team sit a given storm out at a camp, or
     // gamble and keep climbing through it? Style flavors the choice (and,
@@ -341,37 +351,90 @@ export function buildDisplayTrack(
     // squad ever drops is the highest camp it has stood in.
     let campFloor = 0;
 
+    // --- The break for the Col -------------------------------------------
+    // The field no longer bunches at Camp IV waiting for one gun. Each squad
+    // reaches the Col and leaves it on its own clock, so a squad that managed
+    // itself well is already on the summit ridge while a spent one is still
+    // below Camp IV — and a late departure is a real chase rather than a
+    // formality. Every input is data the viewer already has (this squad's
+    // readiness bar, its own summit clock, its own draw), and nothing is
+    // written back: core drew the ending before any of this existed, and the
+    // arrival at 1.0 is still stamped to the millisecond by `st`.
+    const st = core.summitTimesMs[team];
+    // The window this squad actually has: from the moment the field breaks for
+    // the Col, to the last instant it can still leave and be drawn onto the
+    // summit at its own exact summit time.
+    const colLastMs = Math.max(colOpenMs, st - minRidgeMs);
+    const colWin = colLastMs - colOpenMs;
+    let colPlan: { wait: number; arrive: number; go: number } | null = null;
+    let colBase = 0;
+    let departMs: number | null = null;
+
+    /** Settle this squad's Col schedule, on the shape it breaks camp in. */
+    const planCol = () => {
+      if (colPlan) return colPlan;
+      colBase = lastPos;
+      // 0 = first squad off the Col, 1 = last. Mostly the shape the squad is
+      // in — that IS the resource game the bars have been telling — with a
+      // light pull from its own summit clock so the picture never reads as
+      // random, plus per-team texture. Weighting condition over the clock is
+      // also what stops the departure order being a readable copy of the
+      // finishing order, which is what it used to be exactly.
+      // Centred on the condition squads actually carry into the closing
+      // window (median ~69), not on the full 0-100 scale: against the whole
+      // range this saturated for most of the field and the spread collapsed.
+      const shape = 1 - clamp01((cond() - 40) / 55);
+      const clock = (st - stMin) / stSpan;
+      const score = clamp01(0.72 * shape + 0.16 * clock + 0.12 * colJitter);
+      colPlan = {
+        // A short breather for everyone, then the walk up: a fresh squad is at
+        // the Col early with time to brew up, a spent one is still grinding
+        // toward it when the leaders have gone.
+        // A spent squad does not merely walk up slower, it sets off later:
+        // sharing one start time and differing only in pace let every laggard
+        // close the gap inside a couple of steps, and the field arrived
+        // together anyway.
+        wait: colOpenMs + (0.03 + 0.5 * score) * colWin,
+        arrive: colOpenMs + (0.08 + 0.72 * score) * colWin,
+        go: colOpenMs + (0.22 + 0.72 * score) * colWin,
+      };
+      return colPlan;
+    };
+
     for (const t of tMs) {
       const u = t / durationMs;
       const p = progressAt(core.grid, team, t);
       let x: number;
 
-      if (t >= core.pushStartMs) {
-        // The final act, staged for the screen — and for the story so far.
-        // Mapping raw p straight onto the ridge strung the field across the
-        // whole upper mountain (the ending looked decided at once); packing
-        // everyone into one departing bunch erased the race instead. So:
-        // departures from the Col are STAGGERED by roughly half of each
-        // team's finishing margin — the leaders clip in and go while the
-        // stragglers are still at their tents, which is the race so far
-        // made visible — and each team then climbs on its own summit-timed
-        // ease, so late departers never quite claw back the front group,
-        // near-rivals duel within a rope-length, and the tail is dropped
-        // low on the ridge when the winner tops out. A bounded trace of
-        // the raw-p signal survives as stall/surge texture. Summit arrival
-        // stays exact to the millisecond, and none of this touches the
-        // engine's staging — standings rank by checkpoints, not pixels.
-        const st = core.summitTimesMs[team];
-        const depart = core.pushStartMs + departWobble * (st - stMin);
-        const u2 = Math.max(0, Math.min(1, (t - depart) / Math.max(1, st - depart)));
+      // Has this squad committed to the ridge yet? The final act is per squad
+      // now, not one gun fired for the whole field at pushStartMs.
+      const onRidge =
+        departMs !== null ||
+        (u >= COL_APPROACH_U && t >= planCol().go && lastPos >= COL_PARK - 1e-9);
+
+      if (onRidge) {
+        // The summit ridge, staged for the screen — and for the story so far.
+        // Each squad climbs its own summit-timed ease from the Col it actually
+        // left, so an early departure really is time in hand, a late one really
+        // is a chase, and near-rivals duel within a rope-length. A bounded
+        // trace of the raw-p signal survives as stall/surge texture once the
+        // engine's own push is live. Summit arrival stays exact to the
+        // millisecond, and none of this touches the engine's staging —
+        // standings rank by checkpoints and by p, never by pixels.
+        if (departMs === null) departMs = t;
+        const u2 = Math.max(0, Math.min(1, (t - departMs) / Math.max(1, st - departMs)));
         const base = Math.pow(u2, 1.45);
         const affine = (Math.max(p, HOLD_P) - HOLD_P) / (1 - HOLD_P);
+        // Before the engine's push, p is pinned under HOLD_P by construction,
+        // so the trace would read as a constant drag rather than as texture.
         const texture =
-          Math.max(-0.035, Math.min(0.035, (affine - base) * 0.3)) * (1 - u2);
+          t < core.pushStartMs
+            ? 0
+            : Math.max(-0.035, Math.min(0.035, (affine - base) * 0.3)) * (1 - u2);
         const target =
           C4_FRAC + (1 - C4_FRAC) * Math.max(0, Math.min(1, base + texture));
         x = Math.min(target, lastPos + pushCatch);
-        x = Math.max(x, lastPos); // monotone during the push
+        x = Math.max(x, lastPos); // monotone on the ridge
         if (p >= 1 - 1e-6) x = 1; // the summit moment is exact
       } else if (u >= COL_APPROACH_U) {
         // A hold taken during the rotations keeps holding into the approach
@@ -388,14 +451,21 @@ export function buildDisplayTrack(
         if (stillHeld) {
           x = stormCamp[heldSi]!;
         } else {
-          // Converge on the South Col: ease from wherever we are toward C4,
-          // arrival staggered naturally by each team's p.
-          const f = (u - COL_APPROACH_U) / (PUSH_U - COL_APPROACH_U);
+          // This squad's own walk up to the Col: sit where the rotations left
+          // it, then climb, arriving at its own hour instead of everyone's.
+          const plan = planCol();
+          colBase = Math.max(colBase, lastPos);
+          const f = Math.max(
+            0,
+            Math.min(1, (t - plan.wait) / Math.max(1, plan.arrive - plan.wait)),
+          );
           const ease = f * f * (3 - 2 * f);
-          const target = Math.min(C4_FRAC - 0.002, Math.max(p, lastPos));
-          x = lastPos + (Math.max(target, C4_FRAC - 0.02 - 0.06 * (1 - ease)) - lastPos) * Math.min(1, ease * 1.4);
-          x = Math.min(x, C4_FRAC - 0.002);
-          x = Math.max(x, lastPos - 0.0005); // effectively monotone here
+          let target = colBase + (COL_PARK - colBase) * ease;
+          // Backstop: the summit time is fixed, so the walk-up has to end.
+          // Once the ridge clock is the binding constraint, close the gap at
+          // whatever the approach cap allows.
+          if (t >= plan.go) target = COL_PARK;
+          x = Math.max(lastPos, Math.min(COL_PARK, target));
         }
       } else {
         // A hold takes precedence over everything else in the rotation
@@ -520,16 +590,16 @@ export function buildDisplayTrack(
         }
       }
 
-      if (t < core.pushStartMs) {
+      if (!onRidge) {
         // Keep visible motion sane: no display teleports between sparse
         // steps. During the Col approach teams hustle — the window is open.
         const cap = u >= COL_APPROACH_U ? approachCap : normalCap;
         x = Math.max(lastPos - cap, Math.min(lastPos + cap, x));
+        // The floor is absolute, not just a target for the rest dip: the
+        // short-handed pace lag must not walk a team back below a camp it
+        // already stood in either.
+        x = Math.max(x, campFloor);
       }
-      // The floor is absolute, not just a target for the rest dip: the
-      // short-handed pace lag must not walk a team back below a camp it
-      // already stood in either.
-      if (t < core.pushStartMs) x = Math.max(x, campFloor);
 
       // Rock bottom means rock bottom. A squad with nothing left does not
       // keep strolling uphill: climbing slows as condition falls and stops

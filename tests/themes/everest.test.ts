@@ -170,6 +170,44 @@ describe('everest theme', () => {
     expect(safeProtecting).toBeGreaterThan(riskyProtecting);
   });
 
+  it('the field does not all regroup at Camp IV waiting for one gun', () => {
+    // The last ninth of the race used to be a mandatory parade: every team was
+    // walked to the same parked position on a clock that was a function of
+    // race time alone, and nobody could leave the Col before pushStartMs. Each
+    // squad now reaches and leaves on its own schedule.
+    const C4 = NODES.find((nd) => nd.id === 'C4')!.frac;
+    const spreads: number[] = [];
+    let overlapRaces = 0;
+    for (const t of runs.slice(0, 30)) {
+      const times = t.displayTrack.tMs;
+      const wiped = new Set(t.wipeouts.map((w) => w.teamIdx));
+      const arrive: number[] = [];
+      for (let team = 0; team < N; team++) {
+        if (wiped.has(team)) continue;
+        const pos = t.displayTrack.pos[team];
+        for (let i = 0; i < times.length; i++) {
+          if (pos[i] >= C4 - 0.01) { arrive.push(times[i]); break; }
+        }
+      }
+      if (arrive.length > 1) spreads.push((Math.max(...arrive) - Math.min(...arrive)) / DUR);
+      for (let i = 0; i < times.length; i++) {
+        const live = t.displayTrack.pos
+          .map((r, k) => (wiped.has(k) ? null : r[i]))
+          .filter((v): v is number => v !== null);
+        if (live.some((v) => v > C4 + 0.03) && live.some((v) => v < C4 - 0.02)) {
+          overlapRaces++;
+          break;
+        }
+      }
+    }
+    const med = [...spreads].sort((a, b) => a - b)[Math.floor(spreads.length / 2)];
+    // Camp IV arrivals spread across a real slice of the race...
+    expect(med).toBeGreaterThan(0.02);
+    // ...and often enough, someone is on the summit ridge while someone else
+    // has not yet reached Camp IV at all.
+    expect(overlapRaces).toBeGreaterThan(spreads.length * 0.25);
+  });
+
   it('a camp once reached is a floor for the rest of the climb', () => {
     // Real expeditions do walk all the way back to Base Camp between
     // rotations, but on screen a squad sliding below a camp it already stood

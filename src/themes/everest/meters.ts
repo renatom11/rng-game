@@ -49,10 +49,10 @@ const R = {
   foodWork: 2.4,
   foodDown: 0.6,
   /** Bottled gas, burned above 5900 m; `thinAir` multiplies it above 7000 m. */
-  o2Work: 3.1,
+  o2Work: 3.35,
   o2Camp: 1.0,
   o2Down: 0.5,
-  o2Bid: 1.2,
+  o2Bid: 2.2,
   thinAir: 1.25,
   /**
    * Effort. Rotation work is repeated hard labour — carry, climb, retreat,
@@ -64,12 +64,19 @@ const R = {
    * nothing left for the bar to say.
    */
   work: 2.5,
-  workBid: 1.0,
+  workBid: 1.75,
   workDown: 0.7,
   /** Rest. Thick air is why squads keep going back down. */
   restLow: 6.8,
   restMid: 3.2,
   restHigh: 0.8,
+  /**
+   * Above the Col nobody recovers — you deteriorate, which is why squads do
+   * not sit at Camp IV a moment longer than the weather makes them. Without
+   * this, waiting for a summit slot at 7950 m read as a rest stop and the
+   * whole field arrived on the ridge fresher than it left Base Camp.
+   */
+  deathZone: 4.2,
   /** Resupply at a camp porters can actually reach. */
   o2Stock: 11,
   foodStock: 9,
@@ -195,7 +202,14 @@ export function createTeamMeters(
         // Resting. Recovery is dramatically better in thick air — which is
         // exactly why squads keep going back down.
         energy +=
-          recover * (alt < 6200 ? R.restLow : alt < 7200 ? R.restMid : R.restHigh);
+          recover *
+          (alt < 6200
+            ? R.restLow
+            : alt < 7200
+              ? R.restMid
+              : alt < 7600
+                ? R.restHigh
+                : -R.deathZone);
         // Resupply: porters reach the low camps freely, the high camps
         // barely, and nothing crosses the Col once the push is on. Without
         // the partial high-camp stock a squad that stays up top simply
