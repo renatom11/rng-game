@@ -71,8 +71,7 @@ export default function Home() {
       <ul className="landing-points">
         <li>
           <strong>Perfectly fair.</strong> The final order is a uniformly random
-          draw — team names, colors, and climbing styles never change anyone&apos;s
-          odds.
+          draw — team names and colors never change anyone&apos;s odds.
         </li>
         <li>
           <strong>Check in any time.</strong> Share one link. Rotations, storms,

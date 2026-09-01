@@ -5,11 +5,9 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { TEAM_PALETTE } from '@/themes/everest/names';
 
-type Style = 'bold' | 'balanced' | 'cautious' | '';
 
 interface TeamRow {
   name: string;
-  style: Style;
 }
 
 const DURATIONS: [string, number][] = [
@@ -28,7 +26,7 @@ export default function NewRacePage() {
     // Twelve rows, pre-named, so "create a race" needs no typing at all —
     // overwrite the ones you care about, delete the rest. Blank rows are
     // dropped on submit.
-    Array.from({ length: 12 }, (_, i) => ({ name: `Team ${i + 1}`, style: '' as Style })),
+    Array.from({ length: 12 }, (_, i) => ({ name: `Team ${i + 1}` })),
   );
   const [durationMs, setDurationMs] = useState(3_600_000);
   const [customMin, setCustomMin] = useState('');
@@ -49,7 +47,7 @@ export default function NewRacePage() {
       .filter(Boolean)
       .slice(0, 50);
     if (names.length >= 2) {
-      setTeams(names.map((name) => ({ name, style: '' as Style })));
+      setTeams(names.map((name) => ({ name })));
     }
   };
 
@@ -64,7 +62,6 @@ export default function NewRacePage() {
           .filter((t) => t.name.trim())
           .map((t) => ({
             name: t.name.trim(),
-            ...(t.style ? { style: t.style } : {}),
           })),
         durationMs: customMin
           ? Math.round(Number(customMin) * 60_000)
@@ -129,16 +126,6 @@ export default function NewRacePage() {
                   }
                 }}
               />
-              <select
-                value={t.style}
-                onChange={(e) => setTeam(i, { style: e.target.value as Style })}
-                title="Style flavors the routes they take — it never changes their odds."
-              >
-                <option value="">Let the mountain decide</option>
-                <option value="bold">Bold</option>
-                <option value="balanced">Balanced</option>
-                <option value="cautious">Cautious</option>
-              </select>
               <button
                 className="team-remove"
                 onClick={() => setTeams((ts) => ts.filter((_, j) => j !== i))}
@@ -152,14 +139,15 @@ export default function NewRacePage() {
         </div>
         <button
           className="team-add"
-          onClick={() => setTeams((ts) => [...ts, { name: '', style: '' }])}
+          onClick={() => setTeams((ts) => [...ts, { name: '' }])}
           disabled={teams.length >= 50}
         >
           + Add team
         </button>
         <p className="field-hint">
-          Style is pure flavor — bold teams take the risky lines, cautious
-          ones the safe ones. The odds stay exactly equal either way.
+          Which line a squad takes through the Icefall or across the Face is
+          not a setting — it comes out of how much they have left and how far
+          behind they are when they get to the fork.
         </p>
       </div>
 

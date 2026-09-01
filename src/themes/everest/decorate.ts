@@ -2,7 +2,7 @@ import type { CoreTimeline } from '@/engine/types';
 import type { RNG } from '@/engine/prng';
 import { randInt, weightedPick } from '@/engine/prng';
 import { NODES, SEGMENTS, type RouteEdge, type RouteSegment } from './route';
-import type { Style } from './types';
+import { METER_INDEX } from './meters';
 
 /** Route shape for traversal detection, reusable by other journey themes. */
 export interface TraversalRoute {
@@ -28,28 +28,118 @@ export interface Traversal {
   tMs: number; // when the team committed to the segment (upward crossing)
   /** rank delta across this stretch: negative = gained places */
   rankDelta: number;
+  /**
+   * Appetite for the dangerous line when the call was made, 0..1. Recorded so
+   * the narration and the tests can see WHY a line was taken.
+   */
+  appetite: number;
 }
 
-export function assignStyles(
-  rng: RNG,
-  nTeams: number,
-  given: (Style | undefined)[],
-): Style[] {
-  const styles: Style[] = [];
-  for (let i = 0; i < nTeams; i++) {
-    styles.push(
-      given[i] ??
-        weightedPick(rng, ['bold', 'balanced', 'cautious'] as const, [0.3, 0.4, 0.3]),
-    );
+/** Meter rows on the display grid: [team][meterIdx][step]. */
+export type MeterRows = number[][][];
+
+/**
+ * Condition bands on the readiness scale, mirroring the choreography's own
+ * brake so the fork and the climb can never contradict each other: at
+ * BRAKE_STOP a squad has stopped climbing at all, and by RISK_FREE it is fit
+ * enough to pick a line for speed rather than for survival.
+ */
+const BRAKE_STOP = 12;
+const RISK_FREE = 88;
+
+const clamp01 = (x: number) => Math.max(0, Math.min(1, x));
+const clamp11 = (x: number) => Math.max(-1, Math.min(1, x));
+
+/**
+ * Condition on the 0-100 readiness scale, pulled toward raw energy because
+ * "have they got the legs for this line" is the question a fork actually
+ * asks. Callers with no meters read an even 55 and the fork becomes a purely
+ * positional call.
+ */
+function conditionAt(meters: MeterRows | undefined, team: number, i: number): number {
+  const rows = meters?.[team];
+  const ready = rows?.[METER_INDEX.READY]?.[i];
+  const energy = rows?.[METER_INDEX.ENERGY]?.[i];
+  if (ready === undefined || energy === undefined) return 55;
+  return 0.6 * ready + 0.4 * energy;
+}
+
+function spreadStats(vals: number[], minSpread: number): { mean: number; spread: number } {
+  let sum = 0;
+  let lo = Infinity;
+  let hi = -Infinity;
+  for (const v of vals) {
+    sum += v;
+    if (v < lo) lo = v;
+    if (v > hi) hi = v;
   }
-  return styles;
+  return { mean: sum / vals.length, spread: Math.max(minSpread, hi - lo) };
 }
 
-const STYLE_BIAS: Record<Style, Record<string, number>> = {
-  bold: { risky: 2.2, medium: 1, safe: 0.5 },
-  balanced: { risky: 1, medium: 1.6, safe: 1 },
-  cautious: { risky: 0.45, medium: 1, safe: 2.2 },
-};
+/** What a squad can see about itself and the field at one grid step. */
+interface FieldRead {
+  /** +1 = at the back of the field, 0 = mid-pack, -1 = way out front. */
+  gap: number;
+  /** 0 = nothing left, 1 = fit to gamble. */
+  strength: number;
+}
+
+function readField(
+  pos: number[][],
+  meters: MeterRows | undefined,
+  team: number,
+  i: number,
+): FieldRead {
+  const n = pos.length;
+  const posVals = new Array<number>(n);
+  const condVals = new Array<number>(n);
+  for (let t = 0; t < n; t++) {
+    posVals[t] = pos[t][i];
+    condVals[t] = conditionAt(meters, t, i);
+  }
+  // Normalised by how spread THIS field is: the read is "behind the pack",
+  // not "behind by 0.07 of a mountain".
+  const p = spreadStats(posVals, 0.05);
+  const gap = clamp11(((p.mean - posVals[team]) / p.spread) * 2);
+  // The absolute read says whether they CAN gamble, on the same band the
+  // choreography brakes in; the relative read says whether they are the one
+  // in shape to. Keeping a relative term means the hard lines never vanish
+  // if the meter tuning as a whole ever moves.
+  const c = spreadStats(condVals, 8);
+  const abs = clamp01((condVals[team] - BRAKE_STOP) / (RISK_FREE - BRAKE_STOP));
+  const rel = clamp11(((condVals[team] - c.mean) / c.spread) * 2);
+  return { gap, strength: clamp01(0.65 * abs + 0.35 * (0.5 + 0.5 * rel)) };
+}
+
+/**
+ * Appetite for the dangerous line, 0..1 — the whole rule in one expression:
+ *
+ *   behind AND something left  -> go for it. Being behind only buys the
+ *     appetite a squad has the condition to spend, which is what makes
+ *     "chasing, and still strong" the one state that really gambles.
+ *   behind and spent -> take the safe line, rest, and come back for the hard
+ *     one at the next fork once the rest has bought something back.
+ *   way ahead and spent -> protect it; the safest line on offer.
+ *   ahead but strong -> the standard line, the risky one still live.
+ */
+export function riskAppetite({ gap, strength }: FieldRead): number {
+  const behind = Math.max(0, gap);
+  const ahead = Math.max(0, -gap);
+  return clamp01(
+    0.16 + 0.5 * strength + 0.42 * behind * strength - 0.34 * ahead * (1 - 0.5 * strength),
+  );
+}
+
+/** Appetite -> weights over whatever grades this segment actually offers. */
+function edgeWeights(edges: RouteEdge[], a: number): number[] {
+  return edges.map((e) =>
+    e.risk === 'risky'
+      ? 0.12 + 3.6 * a * a
+      : e.risk === 'safe'
+        ? 0.12 + 3.6 * (1 - a) * (1 - a)
+        : 1.15 + 0.85 * (1 - Math.abs(2 * a - 1)),
+  );
+}
 
 /** Rank of a team in a standings order array (1-based). */
 function rankIn(order: number[], teamIdx: number): number {
@@ -57,21 +147,27 @@ function rankIn(order: number[], teamIdx: number): number {
 }
 
 /**
- * Detect upward segment entries from the display track and choose an edge
- * for each, correlated with the team's rank move around that stretch so the
- * story reads causally (risky + big gain = payoff, risky + big loss = punished).
+ * Detect upward segment entries from the display track and choose an edge for
+ * each from the squad's OWN STATE at that instant: what it has left (its
+ * meters, on this same grid) and how far behind the field it is (the display
+ * positions, on this same grid). No personality, no dial, and no look-ahead.
+ *
+ * The rank move across the stretch is still RECORDED, but only so the event
+ * layer can narrate the payoff or the punishment after the fact. It used to
+ * DRIVE the choice, which read the standings from the checkpoint AFTER the
+ * fork — so "took the risky line" was a weak forward signal of a rank gain
+ * sitting in a payload served at the moment of the fork.
  */
 export function buildTraversals(
   rng: RNG,
   core: CoreTimeline,
   displayTrack: { tMs: number[]; pos: number[][] },
-  styles: Style[],
+  meters?: MeterRows,
   route: TraversalRoute = EVEREST_TRAVERSAL_ROUTE,
 ): Traversal[] {
   const nTeams = displayTrack.pos.length;
   const SEGS = route.segments;
   const out: Traversal[] = [];
-  const moveThresh = Math.max(2, Math.round(nTeams / 6));
 
   for (let team = 0; team < nTeams; team++) {
     const row = displayTrack.pos[team];
@@ -82,7 +178,7 @@ export function buildTraversals(
         if (!(row[i - 1] <= fromFrac + 1e-9 && row[i] > fromFrac + 1e-9)) continue;
         const tMs = displayTrack.tMs[i];
 
-        // Rank move across the surrounding stretch, from checkpoint standings.
+        // Recorded for the event layer only. The CHOICE below never sees it.
         const before = lastCheckpointBefore(core, tMs);
         const after = nextCheckpointAfter(core, tMs);
         let rankDelta = 0;
@@ -92,24 +188,16 @@ export function buildTraversals(
 
         const edges = SEGS[s].edges;
         let edge: RouteEdge;
+        let appetite = 0.5;
         if (edges.length === 1) {
           edge = edges[0];
         } else {
-          const bias = STYLE_BIAS[styles[team]];
-          let weights: number[];
-          if (rankDelta <= -moveThresh) {
-            weights = edges.map((e) => ({ risky: 3, medium: 1, safe: 0.3 })[e.risk] * bias[e.risk]);
-          } else if (rankDelta >= moveThresh) {
-            const gamble = rng() < (styles[team] === 'bold' ? 0.7 : styles[team] === 'cautious' ? 0.3 : 0.5);
-            weights = gamble
-              ? edges.map((e) => ({ risky: 4, medium: 0.8, safe: 0.2 })[e.risk] * bias[e.risk])
-              : edges.map((e) => ({ risky: 0.2, medium: 0.9, safe: 3 })[e.risk] * bias[e.risk]);
-          } else {
-            weights = edges.map((e) => ({ risky: 1, medium: 2, safe: 1 })[e.risk] * bias[e.risk]);
-          }
-          edge = weightedPick(rng, edges, weights);
+          appetite = riskAppetite(readField(displayTrack.pos, meters, team, i));
+          // The WEIGHTS are the squad's state; the draw stays stochastic so two
+          // identical situations do not always produce the identical line.
+          edge = weightedPick(rng, edges, edgeWeights(edges, appetite));
         }
-        out.push({ teamIdx: team, segIdx: s, edge, tMs, rankDelta });
+        out.push({ teamIdx: team, segIdx: s, edge, tMs, rankDelta, appetite });
       }
     }
   }

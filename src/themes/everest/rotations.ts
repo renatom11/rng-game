@@ -2,7 +2,6 @@ import type { CoreTimeline } from '@/engine/types';
 import { HOLD_P, PUSH_U, progressAt } from '@/engine/types';
 import type { RNG } from '@/engine/prng';
 import { NODES, nodeById } from './route';
-import type { Style } from './types';
 
 /**
  * The display track: where each team visibly IS on the mountain.
@@ -198,7 +197,6 @@ export function buildDisplayTrack(
   route: RotationRoute = EVEREST_ROTATION_ROUTE,
   paceEvents: PaceEvent[] = [],
   storms: StormWindow[] = [],
-  styles?: Style[],
   conditionFor?: ConditionFactory,
   wipeouts: Wipeout[] = [],
 ): { tMs: number[]; pos: number[][]; beats: ChoreoBeat[] } {
@@ -242,8 +240,12 @@ export function buildDisplayTrack(
     // Weather decisions: does this team sit a given storm out at a camp, or
     // gamble and keep climbing through it? Style flavors the choice (and,
     // like every style effect, shapes only the telling — never the outcome).
-    const style = styles?.[team] ?? 'balanced';
-    const holdP = style === 'cautious' ? 0.9 : style === 'bold' ? 0.4 : 0.7;
+    // Whether to sit a storm out is read from condition alone — the same rule
+    // the route forks use. No personality, no dial. (The field's standing is
+    // deliberately NOT used here: teams are choreographed one at a time, so at
+    // this point the rest of the field has no positions yet. Standing-aware
+    // risk belongs in buildTraversals, which runs over a finished track.)
+    const holdP = 0.7;
     // The squad's live condition. Without one (bare choreography, as the
     // tests build it) every decision sees an even 55 and behaves as it always
     // did.

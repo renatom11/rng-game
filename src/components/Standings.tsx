@@ -223,8 +223,8 @@ function TeamCard({
       <div className="team-card-head">
         <h3>
           {dossier
-            ? `Sponsored by ${teamName} · ${snap.styles[teamIdx]}`
-            : `${jt.squadTitle} · ${snap.styles[teamIdx]}`}
+            ? `Sponsored by ${teamName}`
+            : jt.squadTitle}
         </h3>
         <div className="ready-gauge-wrap">
           <ReadyGauge value={m.readiness} />

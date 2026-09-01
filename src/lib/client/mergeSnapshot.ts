@@ -28,7 +28,6 @@ function mergeJourney(
     sinceMs: prev.sinceMs, // merged result covers what prev covered
     complete: false,
     climbers: prev.climbers,
-    styles: prev.styles,
     colors: prev.colors,
     edgeRisk: prev.edgeRisk,
     storms: prev.storms,

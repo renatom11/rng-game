@@ -52,7 +52,6 @@ describe('delta snapshots', () => {
     const delta = toEverestSnapshot(everest, e2, { complete: false, sinceMs: since });
     expect(delta.sinceMs).toBe(since);
     expect(delta.climbers).toHaveLength(0);
-    expect(delta.styles).toHaveLength(0);
     expect(delta.colors).toHaveLength(0);
     for (const e of delta.events) {
       expect(e.tMs).toBeGreaterThan(since);
