@@ -291,7 +291,7 @@ export function heightAt(x: number, z: number): number {
 // ---------------------------------------------------------------------------
 
 export const GRID = {
-  x0: -5400, x1: 2500, z0: -1700, z1: 3950, nx: 290, nz: 210,
+  x0: -5400, x1: 2500, z0: -1700, z1: 3950, nx: 440, nz: 320,
 };
 
 function hex(c: string): [number, number, number] {
@@ -306,11 +306,11 @@ const ALB = {
   snowA: hex('#e9f0fa'), snowB: hex('#f7fafe'),
   cwm: hex('#f4f8ff'),
   ice: hex('#b6cfe7'),
-  rock: hex('#2e3a52'),
+  rock: hex('#3d4a63'),
   band: hex('#c2a668'),
   spur: hex('#39415a'),
-  moraine: hex('#6e6a5f'),
-  rubble: hex('#7c756a'),
+  moraine: hex('#66655f'),
+  rubble: hex('#74716b'),
 };
 
 function mix(a: [number, number, number], b: [number, number, number], t: number): [number, number, number] {
@@ -364,19 +364,49 @@ export function buildTerrain(): TerrainData {
     for (let i = 0; i < nx; i++) {
       const x = x0 + i * dx;
       const z = z0 + j * dz;
-      const y = heightAt(x, z);
       const k = j * nx + i;
-      positions[k * 3] = x;
+      // Jittering interior vertices breaks the regular grid's sawtooth
+      // aliasing along sharp ridge crests; heights[] stays on the regular
+      // grid so contour extraction is unaffected.
+      const edge = i === 0 || j === 0 || i === nx - 1 || j === nz - 1;
+      const h1 = Math.sin(i * 127.1 + j * 311.7) * 43758.5453;
+      const h2 = Math.sin(i * 269.5 + j * 183.3) * 28001.8384;
+      const xj = edge ? x : x + (h1 - Math.floor(h1) - 0.5) * 0.82 * dx;
+      const zj = edge ? z : z + (h2 - Math.floor(h2) - 0.5) * 0.82 * dz;
+      const y = heightAt(xj, zj);
+      positions[k * 3] = xj;
       positions[k * 3 + 1] = y;
-      positions[k * 3 + 2] = z;
-      heights[k] = y;
-      const sx = (heightAt(x + dx, z) - heightAt(x - dx, z)) / (2 * dx);
-      const sz = (heightAt(x, z + dz) - heightAt(x, z - dz)) / (2 * dz);
+      positions[k * 3 + 2] = zj;
+      heights[k] = heightAt(x, z);
+      const sx = (heightAt(xj + dx, zj) - heightAt(xj - dx, zj)) / (2 * dx);
+      const sz = (heightAt(xj, zj + dz) - heightAt(xj, zj - dz)) / (2 * dz);
       const slope = (Math.atan(Math.hypot(sx, sz)) * 180) / Math.PI;
-      const [r, g, b] = albedoAt(x, z, y, slope);
+      const [r, g, b] = albedoAt(xj, zj, y, slope);
       colors[k * 3] = r;
       colors[k * 3 + 1] = g;
       colors[k * 3 + 2] = b;
+    }
+  }
+  // Baked ambient occlusion: concavities sit below their neighborhood and
+  // catch less sky — darkening them gives the relief real depth for free.
+  for (let j = 0; j < nz; j++) {
+    for (let i = 0; i < nx; i++) {
+      const k = j * nx + i;
+      let sum = 0;
+      let cnt = 0;
+      for (const [di, dj] of [[-3, 0], [3, 0], [0, -3], [0, 3], [-3, -3], [3, 3], [-3, 3], [3, -3]]) {
+        const ii = i + di;
+        const jj = j + dj;
+        if (ii < 0 || jj < 0 || ii >= nx || jj >= nz) continue;
+        sum += heights[jj * nx + ii];
+        cnt++;
+      }
+      if (!cnt) continue;
+      const occ = Math.max(0, Math.min(1, (sum / cnt - heights[k]) / 130));
+      const f = 1 - occ * 0.28;
+      colors[k * 3] *= f;
+      colors[k * 3 + 1] *= f;
+      colors[k * 3 + 2] *= f;
     }
   }
   const indices = new Uint32Array((nx - 1) * (nz - 1) * 6);

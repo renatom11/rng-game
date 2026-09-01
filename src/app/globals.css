@@ -1356,6 +1356,26 @@ button { font-family: inherit; }
   text-shadow: 0 1px 3px rgba(2, 5, 12, 0.9);
   white-space: nowrap;
 }
+/* teams-as-lights: tiny mono tags beside each light, never a bubble */
+.m3d-tag {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--font-data);
+  font-size: 8.5px;
+  letter-spacing: 0.08em;
+  color: #eaf1fc;
+  background: rgba(5, 9, 18, 0.6);
+  border-radius: 5px;
+  padding: 1.5px 5px;
+  pointer-events: none;
+  will-change: transform;
+  transition: opacity 300ms ease;
+}
+.m3d-tag i { width: 5px; height: 5px; border-radius: 50%; display: inline-block; }
 .m3d-snap {
   position: absolute;
   left: 12px;

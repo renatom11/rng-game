@@ -55,25 +55,29 @@ const LABELS: { id: string; name: string; alt: string; tier: 0 | 1 }[] = [
   { id: 'SUMMIT', name: 'Summit', alt: '8,849 m', tier: 0 },
 ];
 
-function circleTexture(color: string, tag: string): THREE.CanvasTexture {
+/** A team is a light, not a badge: bright core, color ring, soft falloff. */
+function lightTexture(color: string): THREE.CanvasTexture {
   const c = document.createElement('canvas');
   c.width = c.height = 128;
   const g = c.getContext('2d')!;
+  const soft = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+  soft.addColorStop(0, color);
+  soft.addColorStop(0.45, color + '66');
+  soft.addColorStop(1, color + '00');
+  g.fillStyle = soft;
+  g.fillRect(0, 0, 128, 128);
   g.beginPath();
-  g.arc(64, 64, 54, 0, Math.PI * 2);
+  g.arc(64, 64, 26, 0, Math.PI * 2);
   g.fillStyle = color;
   g.fill();
-  g.lineWidth = 10;
-  g.strokeStyle = 'rgba(8, 14, 26, 0.95)';
+  g.lineWidth = 5;
+  g.strokeStyle = 'rgba(6, 10, 20, 0.8)';
   g.stroke();
-  g.fillStyle = '#0a1220';
-  g.font = '700 44px system-ui, sans-serif';
-  g.textAlign = 'center';
-  g.textBaseline = 'middle';
-  g.fillText(tag, 64, 68);
-  const t = new THREE.CanvasTexture(c);
-  t.anisotropy = 2;
-  return t;
+  g.beginPath();
+  g.arc(64, 64, 13, 0, Math.PI * 2);
+  g.fillStyle = '#fdfefe';
+  g.fill();
+  return new THREE.CanvasTexture(c);
 }
 
 function glowTexture(color: string): THREE.CanvasTexture {
@@ -157,8 +161,8 @@ export function MountainMap3D(props: Props) {
           uniform vec3 topC; uniform vec3 midC; uniform vec3 horC;
           void main(){
             float h = normalize(vP).y;
-            float lo = smoothstep(-0.06, 0.22, h);
-            float hi = smoothstep(0.16, 0.85, h);
+            float lo = smoothstep(-0.04, 0.10, h);
+            float hi = smoothstep(0.07, 0.55, h);
             vec3 c = mix(horC, mix(midC, topC, hi), lo);
             gl_FragColor = vec4(c, 1.0);
           }`,
@@ -197,6 +201,48 @@ export function MountainMap3D(props: Props) {
       polygonOffsetFactor: 1,
       polygonOffsetUnits: 1,
     });
+    // Surface character: wind-carved sastrugi on snow, striation on rock,
+    // and a faint daylight glint — micro-relief the geometry can't afford,
+    // faked in the normal before lighting runs.
+    const terrainUniforms = { uDay: { value: 1 } };
+    terrainMat.onBeforeCompile = (shader) => {
+      shader.uniforms.uDay = terrainUniforms.uDay;
+      shader.vertexShader = shader.vertexShader
+        .replace('#include <common>', '#include <common>\nvarying vec3 vWPos;')
+        .replace('#include <begin_vertex>', '#include <begin_vertex>\nvWPos = (modelMatrix * vec4(position, 1.0)).xyz;');
+      shader.fragmentShader = shader.fragmentShader
+        .replace('#include <common>', `#include <common>
+varying vec3 vWPos;
+uniform float uDay;
+float thash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float tnoise(vec2 p){
+  vec2 i = floor(p); vec2 f = fract(p); vec2 u = f * f * (3.0 - 2.0 * f);
+  return mix(mix(thash(i), thash(i + vec2(1.0, 0.0)), u.x),
+             mix(thash(i + vec2(0.0, 1.0)), thash(i + vec2(1.0, 1.0)), u.x), u.y);
+}`)
+        .replace('#include <normal_fragment_begin>', `#include <normal_fragment_begin>
+{
+  float steep = 1.0 - abs(normal.y);
+  vec2 pSnow = vec2(vWPos.x * 0.020, vWPos.z * 0.052);
+  vec2 pRock = vec2(vWPos.x * 0.060, vWPos.y * 0.045);
+  float nS = tnoise(pSnow) + 0.5 * tnoise(pSnow * 2.7 + 13.1);
+  float nR = tnoise(pRock) + 0.5 * tnoise(pRock * 3.1 + 7.7);
+  float amt = mix(0.22, 0.42, steep);
+  vec2 g = vec2(
+    tnoise(pSnow + vec2(0.13, 0.0)) - nS * 0.66,
+    tnoise(pSnow + vec2(0.0, 0.13)) - nS * 0.66
+  );
+  vec2 gr = vec2(
+    tnoise(pRock + vec2(0.11, 0.0)) - nR * 0.66,
+    tnoise(pRock + vec2(0.0, 0.11)) - nR * 0.66
+  );
+  vec2 gm = mix(g, gr, smoothstep(0.35, 0.75, steep));
+  normal = normalize(normal + vec3(gm.x, 0.0, gm.y) * amt);
+  float glint = step(0.985, thash(floor(vWPos.xz * 0.9))) * (1.0 - steep) * uDay;
+  diffuseColor.rgb += glint * 0.18;
+}`);
+      terrainMat.userData.shader = shader;
+    };
     const terrain = new THREE.Mesh(tGeo, terrainMat);
     scene.add(terrain);
 
@@ -350,7 +396,7 @@ export function MountainMap3D(props: Props) {
       const grp = new THREE.Group();
       const dot = new THREE.Sprite(
         new THREE.SpriteMaterial({
-          map: circleTexture(colors[i], tags[i]),
+          map: lightTexture(colors[i]),
           transparent: true, depthWrite: false, depthTest: false,
           sizeAttenuation: false,
         }),
@@ -365,11 +411,11 @@ export function MountainMap3D(props: Props) {
       });
       haloMats.push(haloMat);
       const halo = new THREE.Sprite(haloMat);
-      halo.scale.set(120, 120, 1);
+      halo.scale.set(74, 74, 1);
       grp.add(halo);
 
       const beam = new THREE.Mesh(
-        new THREE.PlaneGeometry(64, 300),
+        new THREE.PlaneGeometry(42, 280),
         new THREE.MeshBasicMaterial({
           map: beamTexture(colors[i]), transparent: true, depthWrite: false,
           blending: THREE.AdditiveBlending, side: THREE.DoubleSide, opacity: 0.8,
@@ -393,6 +439,15 @@ export function MountainMap3D(props: Props) {
     }
 
     // --- DOM labels -----------------------------------------------------
+    // Tiny mono team tags beside each light, suppressed when teams bunch.
+    const tagEls = Array.from({ length: n }, (_, i) => {
+      const el = document.createElement('div');
+      el.className = 'm3d-tag';
+      el.innerHTML = `<i style="background:${colors[i]}"></i>${tags[i]}`;
+      el.style.opacity = '0';
+      labelHost.appendChild(el);
+      return el;
+    });
     const labelEls = LABELS.map((l) => {
       const el = document.createElement('div');
       el.className = 'm3d-label';
@@ -520,14 +575,17 @@ export function MountainMap3D(props: Props) {
       amb.intensity = 0.16 + L.darkness * 0.16;
       // Snow faintly luminous under starlight — the mountain keeps its form.
       terrainMat.emissive.setScalar(0).lerp(new THREE.Color('#1a2540'), L.darkness);
+      terrainUniforms.uDay.value = dayness;
       moon.intensity = Math.max(moon.intensity, L.darkness * 0.45);
       (scene.fog as THREE.FogExp2).color.set(L.horizon);
       (scene.fog as THREE.FogExp2).density =
         0.000013 + L.haze * 0.000012 + stormNow * 0.00021;
       starMat.opacity = L.stars * 0.9;
-      const sunV = sunSprite.position.set(sd[0] * 40000, Math.max(800, sd[1] * 40000), sd[2] * 40000);
-      void sunV;
-      sunSprite.material.opacity = Math.max(0, Math.min(0.95, sd[1] * 3)) * dayness;
+      sunSprite.position.set(sd[0] * 40000, Math.max(800, sd[1] * 40000), sd[2] * 40000);
+      // The bloom shrinks and dims as the sun sinks — no red wall at dusk.
+      const sunScale = 3800 + Math.min(1, sd[1] * 2.4) * 5600;
+      sunSprite.scale.set(sunScale, sunScale, 1);
+      sunSprite.material.opacity = Math.max(0, Math.min(0.9, sd[1] * 2.4)) * dayness;
       moonSprite.position.set(-sd[0] * 36000, 17000, -sd[2] * 36000);
       moonSprite.material.opacity = L.moon * 0.9;
       summitGlow.material.opacity = 0.16 + L.darkness * 0.55;
@@ -543,26 +601,29 @@ export function MountainMap3D(props: Props) {
       // still knows; the mountain does not.
       const white = Math.max(0, (stormNow - 0.8) / 0.2);
       const lampAmt = Math.max(0, Math.min(1, (L.darkness - 0.45) * 1.8));
-      snowMat.opacity = stormNow * 0.85;
-      if (stormNow > 0.02) {
+      // Spindrift is the mountain's resting pulse; storms turn it feral.
+      snowMat.opacity = 0.16 + stormNow * 0.72;
+      snow.visible = true;
+      {
         snow.position.copy(controls.target);
-        snow.position.y = controls.target.y;
         const arr = snowGeo.getAttribute('position') as THREE.BufferAttribute;
+        const fall = 4 + stormNow * 26;
+        const drift = 2.5 + stormNow * 28;
         for (let i = 0; i < SNOW_N; i++) {
-          let y = arr.getY(i) - 14 - stormNow * 22;
-          let x = arr.getX(i) - stormNow * 26;
+          let y = arr.getY(i) - fall;
+          let x = arr.getX(i) - drift;
           if (y < -1300) y += 2600;
           if (x < -2100) x += 4200;
           arr.setY(i, y);
           arr.setX(i, x);
         }
         arr.needsUpdate = true;
-        snow.visible = true;
-      } else snow.visible = false;
+      }
 
       // Team lights.
       const px = renderer.domElement.clientHeight || 1;
-      const dotScale = (26 / (px * 0.5));
+      // A light stays a light at every viewport: 16 CSS px, hard-capped.
+      const dotScale = Math.min(0.055, (2 * 16) / px);
       let leadFrac = 0;
       let spread = 0;
       let minF = 1;
@@ -734,6 +795,26 @@ export function MountainMap3D(props: Props) {
         }
       }
 
+      // Team tags: one per screen cell, so a bunched field never becomes
+      // a pile of text — the rail carries full identity.
+      {
+        const cells = new Set<string>();
+        for (let i = 0; i < teamGroups.length; i++) {
+          const el = tagEls[i];
+          tmpV.copy(teamGroups[i].position).project(camera);
+          const lx = ((tmpV.x + 1) / 2) * wrap.clientWidth;
+          const ly = ((-tmpV.y + 1) / 2) * wrap.clientHeight;
+          const cell = `${Math.round(lx / 46)}:${Math.round(ly / 22)}`;
+          const tWiped = states[i]?.wiped ?? false;
+          const ok =
+            tmpV.z <= 1 && !cells.has(cell) && white < 0.6 && !tWiped &&
+            lx > 20 && lx < wrap.clientWidth - 20 && ly > 20 && ly < wrap.clientHeight - 56;
+          if (ok) cells.add(cell);
+          el.style.opacity = ok ? '0.92' : '0';
+          if (ok) el.style.transform = `translate(-50%, 9px) translate(${lx}px, ${ly}px)`;
+        }
+      }
+
       // Labels: project, tier by distance, fade behind-camera ones.
       const dist = camera.position.distanceTo(controls.target);
       for (let i = 0; i < LABELS.length; i++) {
@@ -767,6 +848,7 @@ export function MountainMap3D(props: Props) {
       controls.dispose();
       renderer.dispose();
       labelEls.forEach((el) => el.remove());
+      tagEls.forEach((el) => el.remove());
       renderer.domElement.remove();
       scene.traverse((o) => {
         const anyO = o as unknown as { geometry?: { dispose?: () => void }; material?: { dispose?: () => void } };
