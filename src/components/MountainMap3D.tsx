@@ -164,13 +164,35 @@ export function MountainMap3D(props: Props) {
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.target.set(...CAM_PRESETS[0].target);
     controls.enableDamping = true;
-    controls.dampingFactor = 0.08;
-    controls.minDistance = 650;
-    controls.maxDistance = 16000;
-    controls.maxPolarAngle = 1.48;
-    controls.enablePan = false;
+    controls.dampingFactor = 0.075;
+    controls.minDistance = 900;
+    controls.maxDistance = 26000;
+    // Keep the viewer on the mountain's own hemisphere: straight down turns
+    // the massif into a flat map, and below the horizon puts them inside it.
+    controls.minPolarAngle = 0.42;
+    controls.maxPolarAngle = 1.46;
+    // Panning is how you look at a camp that is not the orbit centre. Without
+    // it the only way to see anything off-centre is to orbit the whole world.
+    controls.enablePan = true;
+    controls.screenSpacePanning = false;
+    controls.panSpeed = 0.7;
+    controls.rotateSpeed = 0.62;
+    controls.zoomSpeed = 0.72;
     controls.autoRotate = !reduced;
     controls.autoRotateSpeed = 0.32;
+
+    // Panning can walk the orbit centre off the mountain entirely, and there
+    // is no way back. Keep it inside the massif's own box.
+    const PAN_BOUNDS = {
+      x: [-5200, 2400] as const,
+      y: [4900, 9200] as const,
+      z: [-1600, 3800] as const,
+    };
+    const clampTarget = () => {
+      controls.target.x = Math.min(Math.max(controls.target.x, PAN_BOUNDS.x[0]), PAN_BOUNDS.x[1]);
+      controls.target.y = Math.min(Math.max(controls.target.y, PAN_BOUNDS.y[0]), PAN_BOUNDS.y[1]);
+      controls.target.z = Math.min(Math.max(controls.target.z, PAN_BOUNDS.z[0]), PAN_BOUNDS.z[1]);
+    };
 
     // --- sky dome -------------------------------------------------------
     // The sky is a shader, not a gradient: three star layers and the Milky
@@ -324,11 +346,18 @@ export function MountainMap3D(props: Props) {
     // and a faint daylight glint — micro-relief the geometry can't afford,
     // faked in the normal before lighting runs.
     const hazeColor = new THREE.Color('#8ea6c8');
+    // ONE atmosphere. The hero terrain and the far range are two meshes with
+    // two materials, and they used to haze at 1/30000 and 1/15500 — the far
+    // range washing out twice as fast at the same distance. That is a step
+    // change in colour along the exact line where the two meshes meet, which
+    // is the hero grid's rectangle: the massif sat on a warm slab while
+    // everything beyond it turned blue. Shared here so they cannot drift.
+    const hazeK = { value: 1 / 26000 };
     const terrainUniforms = {
       uDay: { value: 1 },
       uSky: { value: new THREE.Color('#27436b') },
       uHaze: { value: hazeColor },
-      uHazeK: { value: 1 / 30000 },
+      uHazeK: hazeK,
       uGlow: { value: new THREE.Color('#ff8a5e') },
       uBand: { value: 0 },
     };
@@ -431,7 +460,7 @@ float tnoise(vec2 p){
     farGeo.computeVertexNormals();
     const farUniforms = {
       uHaze: { value: hazeColor },
-      uHazeK: { value: 1 / 15500 },
+      uHazeK: hazeK,
     };
     const farMat = new THREE.MeshLambertMaterial({ vertexColors: true });
     farMat.onBeforeCompile = (shader) => {
@@ -443,7 +472,7 @@ float tnoise(vec2 p){
 #ifdef USE_FOG
 {
   float fh = 1.0 - exp(-pow(vFogDepth * uHazeK, 1.35));
-  gl_FragColor.rgb = mix(gl_FragColor.rgb, uHaze, min(0.86, fh));
+  gl_FragColor.rgb = mix(gl_FragColor.rgb, uHaze, min(0.9, fh));
 }
 #endif`);
     };
@@ -465,10 +494,17 @@ float tnoise(vec2 p){
         depthWrite: false,
         side: THREE.DoubleSide,
         uniforms,
-        vertexShader:
-          'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
+        vertexShader: `
+          varying vec2 vUv;
+          varying vec3 vWPos;
+          void main(){
+            vUv = uv;
+            vWPos = (modelMatrix * vec4(position, 1.0)).xyz;
+            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+          }`,
         fragmentShader: `
           varying vec2 vUv;
+          varying vec3 vWPos;
           uniform float uTime; uniform float uCov; uniform vec3 uCol; uniform float uOp; uniform float uSeed;
           float h21(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
           float n2(vec2 p){
@@ -486,8 +522,18 @@ float tnoise(vec2 p){
             p.x += uTime * 0.011;
             float n = fbm(p + fbm(p * 0.5 + uTime * 0.004) * 1.3);
             float a = smoothstep(1.0 - uCov, 1.0 - uCov + 0.34, n);
-            vec2 e = abs(vUv - 0.5) * 2.0;
-            a *= 1.0 - smoothstep(0.7, 1.0, max(e.x, e.y));
+            // Round the deck off well inside its own geometry, on radius
+            // rather than on a square mask — a max(|x|,|y|) falloff still
+            // leaves four straight edges once the deck is dense.
+            float r = length((vUv - 0.5) * 2.0);
+            a *= 1.0 - smoothstep(0.55, 0.98, r);
+            // A deck is a flat plane. Seen from near its own altitude it is
+            // edge-on, and an edge-on plane draws a knife-sharp horizontal
+            // band across the screen — which is what read as "you can see the
+            // boundaries of the particle effects". Fade it out as the view
+            // ray flattens, so it only ever shows when looked down or up at.
+            vec3 V = normalize(vWPos - cameraPosition);
+            a *= smoothstep(0.035, 0.21, abs(V.y));
             float shade = 0.7 + 0.3 * smoothstep(0.2, 0.9, n);
             gl_FragColor = vec4(uCol * shade, a * uOp);
           }`,
@@ -919,12 +965,15 @@ float tnoise(vec2 p){
       terrainUniforms.uBand.value = skyUniforms.uBand.value;
       moon.intensity = Math.max(moon.intensity, L.darkness * 0.62);
       (scene.fog as THREE.FogExp2).color.set(L.horizon);
+      // Storm fog was 0.00021 — sixteen times the clear-sky base, which drowned
+      // the whole massif in flat grey long before the snow or the decks got a
+      // say. A storm should obscure the mountain, not delete it.
       (scene.fog as THREE.FogExp2).density =
-        0.000013 + L.haze * 0.000012 + stormNow * 0.00021;
+        0.000013 + L.haze * 0.000012 + stormNow * 0.00008;
       // Cloud sea: dense at dawn, burning off toward midday, back at dusk.
       {
         const daily = 0.5 + 0.5 * Math.cos((u - 0.03) * Math.PI * 2.3);
-        const cov = Math.min(0.8, 0.3 + 0.3 * daily + stormNow * 0.24);
+        const cov = Math.min(0.8, 0.3 + 0.3 * daily + stormNow * 0.14);
         const cloudLum = 0.16 + dayness * 0.84;
         for (let ci = 0; ci < cloudDecks.length; ci++) {
           const cd = cloudDecks[ci];
@@ -933,13 +982,13 @@ float tnoise(vec2 p){
           cd.uCol.value
             .setRGB(0.86 * cloudLum, 0.9 * cloudLum, 0.97 * cloudLum)
             .lerp(tmpColor.set(L.glow), skyUniforms.uBand.value * 0.35);
-          cd.uOp.value = 0.66 + stormNow * 0.2;
+          cd.uOp.value = 0.66 + stormNow * 0.1;
         }
         // The scud ceiling belongs to the storm alone.
         scudDeck.uTime.value = now * 0.0014 + 200;
-        scudDeck.uCov.value = stormNow * 0.62;
+        scudDeck.uCov.value = stormNow * 0.44;
         scudDeck.uCol.value.setRGB(0.5 * cloudLum + 0.06, 0.53 * cloudLum + 0.065, 0.6 * cloudLum + 0.075);
-        scudDeck.uOp.value = stormNow * 0.85;
+        scudDeck.uOp.value = stormNow * 0.42;
       }
       sunSprite.position.set(sd[0] * 40000, Math.max(800, sd[1] * 40000), sd[2] * 40000);
       // The bloom shrinks and dims as the sun sinks — no red wall at dusk.
@@ -959,7 +1008,9 @@ float tnoise(vec2 p){
 
       // Whiteout: at the top of a storm you cannot see the field. The rail
       // still knows; the mountain does not.
-      const white = Math.max(0, (stormNow - 0.8) / 0.2);
+      // A whiteout should thin the field, not erase it: at full blast the
+      // route grades stayed drawn but faint, instead of vanishing outright.
+      const white = Math.max(0, (stormNow - 0.85) / 0.15) * 0.62;
       const lampAmt = Math.max(0, Math.min(1, (L.darkness - 0.45) * 1.8));
 
       // Route choices: all three grades stay legible, and the lines
@@ -973,10 +1024,15 @@ float tnoise(vec2 p){
         }
       }
       // Spindrift is the mountain's resting pulse; storms turn it feral.
-      snowMat.opacity = 0.16 + stormNow * 0.72;
-      snow.visible = true;
+      snowMat.opacity = 0.1 + stormNow * 0.32;
+      snow.visible = snowMat.opacity > 0.01;
       {
+        // The flurry is a fixed 4.2 km box pinned to the orbit target. Zoomed
+        // out that box is small against the view and its empty surround reads
+        // as a boundary, so scale it with how far the camera is standing off.
         snow.position.copy(controls.target);
+        const standoff = camera.position.distanceTo(controls.target);
+        snow.scale.setScalar(Math.max(1, standoff / 2600));
         const arr = snowGeo.getAttribute('position') as THREE.BufferAttribute;
         const fall = 4 + stormNow * 26;
         const drift = 2.5 + stormNow * 28;
@@ -1174,10 +1230,12 @@ float tnoise(vec2 p){
           camera.position.copy(controls.target).addScaledVector(dir, nd);
         }
       }
-      if (modeRef.current === 'manual' && now - lastInteract > 16000) {
-        setMode('ambient');
-      }
+      // Once someone has taken the camera, they keep it. The drift used to
+      // resume by itself after 16 seconds, which meant lining up a view and
+      // then watching it slide away — and there is already an explicit
+      // "Follow the action" button for handing the camera back.
       controls.autoRotate = !reduced && modeRef.current === 'ambient' && !tween;
+      clampTarget();
       controls.update();
 
       // Preset requests from the snap row.
