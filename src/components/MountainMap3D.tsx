@@ -17,9 +17,10 @@ import { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import type { JourneySnapshot } from '@/lib/slice';
-import { displayPosAt, teamStatesAt, teamTags } from '@/lib/client/raceState';
+import { displayPosAt, edgeChoicesAt, teamStatesAt, teamTags } from '@/lib/client/raceState';
 import { sceneLight } from '@/themes/everest/scene';
 import {
+  buildBranches,
   buildContours,
   buildFarRange,
   buildTerrain,
@@ -53,6 +54,9 @@ const LABELS: { id: string; name: string; alt: string; tier: 0 | 1 }[] = [
   { id: 'SSUM', name: 'South Summit', alt: '8,749 m', tier: 1 },
   { id: 'SUMMIT', name: 'Summit', alt: '8,849 m', tier: 0 },
 ];
+
+/** Start frac of each route segment, for "which leg is this team on". */
+const ROUTE_SEG_FRACS = [0, 0.16, 0.32, 0.52, 0.7, 0.82, 0.92, 0.96];
 
 /** A team is a light, not a badge: bright core, color ring, soft falloff. */
 function lightTexture(color: string): THREE.CanvasTexture {
@@ -508,13 +512,76 @@ float tnoise(vec2 p){
     const plume = new THREE.Points(plumeGeo, plumeMat);
     scene.add(plume);
 
-    // --- the route ------------------------------------------------------
+    // --- the route and its choices --------------------------------------
+    // Every leg offers a safe, a normal and a risky line. They are drawn as
+    // three distinct paths on the mountain so the choice each team makes is
+    // visible in the world, not just in the feed.
     const routePts = ROUTE3.map((p) => new THREE.Vector3(p.x, p.y + 14, p.z));
     const fixedLine = new THREE.Line(
       new THREE.BufferGeometry().setFromPoints(routePts),
-      new THREE.LineBasicMaterial({ color: '#b8933f', transparent: true, opacity: 0.75, depthWrite: false }),
+      new THREE.LineBasicMaterial({ color: '#8a7a52', transparent: true, opacity: 0.3, depthWrite: false }),
     );
     scene.add(fixedLine);
+
+    const RISK_COLOR: Record<string, string> = {
+      safe: '#5fd0a8',
+      medium: '#e8b957',
+      risky: '#ef6a5c',
+    };
+    // Ribbons, not lines: GL clamps line width to one pixel on nearly every
+    // driver, so a hairline vanishes at altitude. A flat strip laid on the
+    // snow reads like a marked climbing line from any distance.
+    const ribbonGeo = (pts: [number, number, number][], halfWidth: number) => {
+      const pos = new Float32Array(pts.length * 2 * 3);
+      for (let i = 0; i < pts.length; i++) {
+        const a = pts[Math.max(0, i - 1)];
+        const b = pts[Math.min(pts.length - 1, i + 1)];
+        const dx = b[0] - a[0];
+        const dz = b[2] - a[2];
+        const len = Math.hypot(dx, dz) || 1;
+        const nx = (-dz / len) * halfWidth;
+        const nz = (dx / len) * halfWidth;
+        const p = pts[i];
+        pos[i * 6] = p[0] - nx; pos[i * 6 + 1] = p[1]; pos[i * 6 + 2] = p[2] - nz;
+        pos[i * 6 + 3] = p[0] + nx; pos[i * 6 + 4] = p[1]; pos[i * 6 + 5] = p[2] + nz;
+      }
+      const idx: number[] = [];
+      for (let i = 0; i < pts.length - 1; i++) {
+        const a = i * 2;
+        idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
+      }
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+      g.setIndex(idx);
+      g.computeVertexNormals();
+      return g;
+    };
+    const branchLines = buildBranches().map((br) => {
+      const mat = new THREE.MeshBasicMaterial({
+        color: RISK_COLOR[br.risk],
+        transparent: true,
+        opacity: 0.5,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      });
+      const ribbon = new THREE.Mesh(ribbonGeo(br.points, 17), mat);
+      ribbon.renderOrder = 6;
+      scene.add(ribbon);
+      // A wider, softer twin so an active line reads as lit rope after dark.
+      const glowMat = new THREE.MeshBasicMaterial({
+        color: RISK_COLOR[br.risk],
+        transparent: true,
+        opacity: 0,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+        side: THREE.DoubleSide,
+      });
+      const glow = new THREE.Mesh(ribbonGeo(br.points, 40), glowMat);
+      glow.renderOrder = 7;
+      glow.position.y = 6;
+      scene.add(glow);
+      return { br, mat, glowMat };
+    });
 
     // --- camps ----------------------------------------------------------
     const campGroup = new THREE.Group();
@@ -740,6 +807,8 @@ float tnoise(vec2 p){
     let states: ReturnType<typeof teamStatesAt> = [];
     let stormNow = 0;
     let finaleStage = -1;
+    const segByEdge = new Map(branchLines.map(({ br }) => [br.id, br.segIdx]));
+    let liveEdges = new Set<string>();
 
     const stormAt = (tMs: number) => {
       let best = 0;
@@ -773,6 +842,17 @@ float tnoise(vec2 p){
         lastTick = tick;
         states = teamStatesAt(p.snap, p.teamNames.length, p.tMs);
         stormNow = stormAt(p.tMs);
+        // Which lines are carrying climbers right now.
+        const choices = edgeChoicesAt(p.snap, p.teamNames.length, p.tMs, segByEdge);
+        const live = new Set<string>();
+        for (let i = 0; i < choices.length; i++) {
+          if (states[i]?.wiped) continue;
+          const pos = displayPosAt(p.snap, i, p.tMs);
+          const segNow = ROUTE_SEG_FRACS.findIndex((f, k) => pos >= f && pos < (ROUTE_SEG_FRACS[k + 1] ?? 2));
+          const id = choices[i][segNow < 0 ? 0 : segNow];
+          if (id) live.add(id);
+        }
+        liveEdges = live;
       }
 
       // Light of the hour.
@@ -871,6 +951,17 @@ float tnoise(vec2 p){
       // still knows; the mountain does not.
       const white = Math.max(0, (stormNow - 0.8) / 0.2);
       const lampAmt = Math.max(0, Math.min(1, (L.darkness - 0.45) * 1.8));
+
+      // Route choices: all three grades stay legible, and the lines
+      // carrying climbers right now glow.
+      {
+        const vis = 1 - white;
+        for (const { br, mat, glowMat } of branchLines) {
+          const on = liveEdges.has(br.id);
+          mat.opacity = vis * (on ? 0.95 : 0.4 + L.darkness * 0.14);
+          glowMat.opacity = on ? vis * (0.28 + L.darkness * 0.3) : 0;
+        }
+      }
       // Spindrift is the mountain's resting pulse; storms turn it feral.
       snowMat.opacity = 0.16 + stormNow * 0.72;
       snow.visible = true;
@@ -1157,6 +1248,11 @@ float tnoise(vec2 p){
   return (
     <div className="m3d-wrap" ref={wrapRef}>
       <div className="m3d-labels" ref={labelsRef} aria-hidden />
+      <div className="m3d-legend" aria-hidden>
+        <span><i style={{ background: '#5fd0a8' }} />safe</span>
+        <span><i style={{ background: '#e8b957' }} />normal</span>
+        <span><i style={{ background: '#ef6a5c' }} />risky</span>
+      </div>
       <div className="m3d-snap" role="group" aria-label="Camera views">
         {CAM_PRESETS.map((c) => (
           <button key={c.id} className="m3d-snap-btn" onClick={() => { presetReq.current = c.id; }}>

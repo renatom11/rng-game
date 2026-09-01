@@ -1376,6 +1376,35 @@ button { font-family: inherit; }
   transition: opacity 300ms ease;
 }
 .m3d-tag i { width: 5px; height: 5px; border-radius: 50%; display: inline-block; }
+.m3d-legend {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  display: flex;
+  gap: 10px;
+  padding: 0.32rem 0.6rem;
+  border-radius: 9px;
+  background: rgba(8, 13, 24, 0.62);
+  border: 1px solid rgba(150, 180, 226, 0.18);
+  backdrop-filter: blur(8px);
+  font-family: var(--font-data);
+  font-size: 0.66rem;
+  letter-spacing: 0.06em;
+  color: var(--snow-3);
+  pointer-events: none;
+}
+.m3d-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.m3d-legend i {
+  width: 13px;
+  height: 2px;
+  border-radius: 1px;
+  display: inline-block;
+}
+
 .m3d-snap {
   position: absolute;
   left: 12px;
