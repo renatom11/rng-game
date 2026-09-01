@@ -6,6 +6,7 @@ import { phaseAt } from './raceState';
 export const SPACE_JOURNEY: JourneyTheme = {
   standingsTitle: 'Fleet standings',
   finaleTitle: 'FINAL DESCENT',
+  finaleArrivedPrefix: 'down at',
   squadTitle: 'Crew',
   readinessLabel: 'Burn readiness',
   wipedCard: 'All contact lost. The void keeps them.',

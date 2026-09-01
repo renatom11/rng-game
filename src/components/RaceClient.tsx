@@ -10,7 +10,7 @@ import type {
 } from '@/lib/slice';
 
 type AnyJourneySnapshot = EverestSnapshot | SpaceSnapshot;
-import { standingsAt } from '@/lib/client/raceState';
+import { heightOrderAt } from '@/lib/client/raceState';
 import { TEAM_PALETTE } from '@/themes/everest/names';
 import { EVEREST_JOURNEY, type JourneyTheme } from '@/lib/client/journeyTheme';
 import { SPACE_JOURNEY } from '@/lib/client/spaceTheme';
@@ -272,8 +272,10 @@ function JourneyView({
 }: ViewProps<AnyJourneySnapshot> & { jt: JourneyTheme }) {
   const MapComponent = journeyMapFor(snap.theme);
   const n = teamNames.length;
+  // The chart tells the same story as the dispatches: live height order,
+  // churning through rotations — not the checkpoint-stepped paper order.
   const orderAt = useCallback(
-    (t: number) => standingsAt(snap, n, t),
+    (t: number) => heightOrderAt(snap, n, t),
     [snap, n],
   );
   const label = jt.phaseLabel(tMs, durationMs);

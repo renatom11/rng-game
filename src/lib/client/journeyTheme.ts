@@ -11,6 +11,8 @@ import { phaseAt } from './raceState';
 export interface JourneyTheme {
   standingsTitle: string;
   finaleTitle: string;
+  /** Prefix for a finisher's arrival clock in the finale board. */
+  finaleArrivedPrefix?: string;
   squadTitle: string;
   readinessLabel: string;
   wipedCard: string;
@@ -52,6 +54,7 @@ export interface JourneyTheme {
 export const EVEREST_JOURNEY: JourneyTheme = {
   standingsTitle: 'On the mountain',
   finaleTitle: 'SUMMIT PUSH',
+  finaleArrivedPrefix: 'up at',
   squadTitle: 'Squad',
   readinessLabel: 'Readiness for next push',
   wipedCard: 'The mountain keeps them. Expedition over.',
