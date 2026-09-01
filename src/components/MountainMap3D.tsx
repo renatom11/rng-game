@@ -1228,6 +1228,8 @@ float tnoise(vec2 p){
         // only enough lift to clear its own ribbon.
         grp.position.set(x, y + 14, z);
         grp.userData.parked = parked;
+        grp.userData.routePos = pos;
+        grp.userData.routeEdge = edgeNow;
         const st = states[i];
         if (st?.wiped) {
           // A lost expedition is its mark, not a dimmed light. Half-lighting a
@@ -1239,7 +1241,6 @@ float tnoise(vec2 p){
           tagEls[i].style.opacity = '0';
           continue;
         }
-        const wiped = false;
         const visMul = 1 - white;
         dotSprites[i].scale.set(dotScale, dotScale, 1);
         dotSprites[i].material.opacity = 0.25 + visMul * 0.75;
@@ -1247,13 +1248,11 @@ float tnoise(vec2 p){
         haloMats[i].opacity = visMul * (0.24 + lampAmt * 0.42);
         haloMats[i].color.setStyle(lampAmt > 0.4 ? '#ffdf9e' : '#ffffff');
         const beamM = beamMeshes[i].material as THREE.MeshBasicMaterial;
-        beamM.opacity = wiped ? 0 : visMul * (0.1 + L.darkness * 0.36);
+        beamM.opacity = visMul * (0.1 + L.darkness * 0.36);
         beamMeshes[i].lookAt(camera.position.x, beamMeshes[i].getWorldPosition(tmpV).y, camera.position.z);
-        if (!wiped) {
-          leadFrac = Math.max(leadFrac, pos);
-          minF = Math.min(minF, pos);
-          maxF = Math.max(maxF, pos);
-        }
+        leadFrac = Math.max(leadFrac, pos);
+        minF = Math.min(minF, pos);
+        maxF = Math.max(maxF, pos);
         // Trail: the last stretch of movement, fading behind the light.
         // Windowed in route space so it hugs the line instead of cutting
         // straight across the mountain between sparse samples.
@@ -1279,10 +1278,9 @@ float tnoise(vec2 p){
       }
       spread = maxF - minF;
 
-      // Fan out co-located climbing markers along the camera's right axis
-      // so a shared camp never becomes one unreadable pile of chips.
+      // Fan out co-located climbing markers so a shared camp never becomes
+      // one unreadable pile of chips.
       {
-        const right = tmpV.setFromMatrixColumn(camera.matrixWorld, 0).clone();
         const buckets = new Map<string, number>();
         for (const g of teamGroups) {
           if (g.userData.parked) continue;
@@ -1290,9 +1288,21 @@ float tnoise(vec2 p){
           const k = buckets.get(key) ?? 0;
           buckets.set(key, k + 1);
           if (k > 0) {
+            // Separate stacked lights ALONG their own line, not across the
+            // screen. Pushing them down camera-right walked them off the
+            // ribbon they had just been placed on — by up to 348 m, where the
+            // lanes are only 90-210 m apart, so a light landed squarely on a
+            // grade nobody chose. Climbers queue up the rope; they do not
+            // stand shoulder to shoulder across the face.
             const side = k % 2 === 1 ? 1 : -1;
-            const mag = Math.ceil(k / 2) * 58;
-            g.position.addScaledVector(right, side * mag);
+            const mag = Math.ceil(k / 2) * 0.0045;
+            const rp = (g.userData.routePos as number) ?? 0;
+            const re = (g.userData.routeEdge as string | null) ?? null;
+            const [ax, ay, az] = posToXYZOn(
+              Math.max(0, Math.min(1, rp + side * mag)),
+              re,
+            );
+            g.position.set(ax, ay + 14, az);
           }
         }
       }
@@ -1305,7 +1315,11 @@ float tnoise(vec2 p){
         if (!sp) {
           sp = new THREE.Sprite(
             new THREE.SpriteMaterial({
-              transparent: true, depthWrite: false, depthTest: false,
+              transparent: true, depthWrite: false,
+              // Occluded by the mountain like everything else. Punching a
+              // dozen permanent crosses through the massif put more
+              // dead-marker pixels on screen than living-team pixels.
+              depthTest: true,
               sizeAttenuation: false,
             }),
           );
@@ -1318,11 +1332,17 @@ float tnoise(vec2 p){
         if (m.map !== tex) { m.map = tex; m.needsUpdate = true; }
         sp.visible = true;
         sp.position.set(d.x, d.y, d.z);
-        const fresh = Math.max(0, 1 - (p.tMs - d.tMs) / 6000);
-        const base = (d.big ? 30 : 22) + fresh * 16;
+        // The flare window is RACE time, and playback defaults to 60x — six
+        // seconds of it is a tenth of a second on screen, so "a flare as it
+        // happens" was under one frame at the speed people actually watch at.
+        // Scaled to the race instead, and clamped: scrubbing backwards inside
+        // one second used to push `fresh` above 1.
+        const flareMs = Math.max(6000, p.durationMs * 0.05);
+        const fresh = Math.max(0, Math.min(1, 1 - (p.tMs - d.tMs) / flareMs));
+        const base = (d.big ? 21 : 15) + fresh * 18;
         const s = Math.min(0.1, (2 * base) / px);
         sp.scale.set(s, s, 1);
-        m.opacity = (0.62 + fresh * 0.38) * (1 - white * 0.7);
+        m.opacity = (0.42 + fresh * 0.5) * (1 - white * 0.7);
       }
       for (let k = deathSites.length; k < deathSprites.length; k++) {
         deathSprites[k].visible = false;
@@ -1486,6 +1506,10 @@ float tnoise(vec2 p){
         anyO.geometry?.dispose?.();
         anyO.material?.dispose?.();
       });
+      // three disposes a material but not the texture it points at, so the
+      // cross canvases would leak one set per mount.
+      for (const t of crossTexCache.values()) t.dispose();
+      crossTexCache.clear();
     };
     // The scene builds once per race; live updates flow through propsRef.
     // eslint-disable-next-line react-hooks/exhaustive-deps

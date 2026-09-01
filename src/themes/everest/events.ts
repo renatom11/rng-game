@@ -198,7 +198,14 @@ export function buildEvents(input: BuildEventsInput): RaceEvent[] {
     }
     const causal = routeCausalCount.get(tr.teamIdx) ?? 0;
     if (causal >= 3 || Math.abs(tr.rankDelta) < moveThresh) continue;
-    const later = tr.tMs + Math.max(30_000, durationMs * 0.015);
+    // The payoff and the punishment are read from the checkpoint AFTER the
+    // fork, so they cannot be told before that checkpoint has happened —
+    // otherwise "that gamble paid" is a forward signal of a rank gain, served
+    // before the gain exists. Removing the look-ahead from the CHOICE closed
+    // half of this channel; this closes the loud half.
+    const resolveAt = core.checkpoints.find((c) => c.tMs > tr.tMs)?.tMs;
+    if (resolveAt === undefined) continue;
+    const later = Math.max(tr.tMs + Math.max(30_000, durationMs * 0.015), resolveAt);
     if (later >= core.pushStartMs) continue;
     const ctx = { ...ctxFor(tr.teamIdx), edge: tr.edge.label };
     if (tr.rankDelta <= -moveThresh && tr.edge.risk === 'risky') {
