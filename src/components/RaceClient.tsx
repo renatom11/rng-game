@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import dynamic from 'next/dynamic';
 import type {
   EverestSnapshot,
   JourneySnapshot,
@@ -263,14 +264,24 @@ export interface JourneyMapProps {
   finale: boolean;
 }
 
-function journeyMapFor(theme: string): React.ComponentType<JourneyMapProps> {
-  return theme === 'space' ? SpaceMap : MountainMap;
+// The 3D massif ships as its own client-only chunk: three.js never loads
+// for the space theme, for SSR, or before the race view mounts.
+const MountainMap3D = dynamic(
+  () => import('./MountainMap3D').then((m) => m.MountainMap3D),
+  { ssr: false, loading: () => <div className="m3d-wrap m3d-loading">Surveying the mountain…</div> },
+);
+
+function journeyMapFor(theme: string, flat: boolean): React.ComponentType<JourneyMapProps> {
+  if (theme === 'space') return SpaceMap;
+  return flat ? MountainMap : (MountainMap3D as React.ComponentType<JourneyMapProps>);
 }
 
 function JourneyView({
   snap, jt, title, teamNames, tMs, durationMs, demo, finale, selected, setSelected,
 }: ViewProps<AnyJourneySnapshot> & { jt: JourneyTheme }) {
-  const MapComponent = journeyMapFor(snap.theme);
+  // 3D is the default stage; the painted profile stays one tap away.
+  const [flatMap, setFlatMap] = useState(false);
+  const MapComponent = journeyMapFor(snap.theme, flatMap);
   const n = teamNames.length;
   const orderAt = useCallback(
     (t: number) => standingsAt(snap, n, t),
@@ -298,6 +309,15 @@ function JourneyView({
             onSelect={setSelected}
             finale={finale}
           />
+          {snap.theme !== 'space' && (
+            <button
+              className="m3d-dim-toggle"
+              onClick={() => setFlatMap((f) => !f)}
+              title={flatMap ? 'Back to the mountain in 3D' : 'The painted profile map'}
+            >
+              {flatMap ? 'View in 3D' : '2D map'}
+            </button>
+          )}
         </section>
         <aside className="side-pane">
           {finale ? (
