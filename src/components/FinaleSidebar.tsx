@@ -10,6 +10,7 @@ import {
   teamStatesAt,
 } from '@/lib/client/raceState';
 import type { JourneyTheme } from '@/lib/client/journeyTheme';
+import { useFlipList } from './useFlip';
 
 interface Props {
   snap: JourneySnapshot;
@@ -46,6 +47,7 @@ export function FinaleSidebar({ snap, jt, teamNames, tMs }: Props) {
     return null;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [snap, tick]);
+  const flipRef = useFlipList(order.join('.'));
 
   return (
     <div className="finale-board">
@@ -59,6 +61,7 @@ export function FinaleSidebar({ snap, jt, teamNames, tMs }: Props) {
           return (
             <li
               key={teamIdx}
+              ref={flipRef(String(teamIdx))}
               className={`finale-row${isUp ? ' summited' : ''}${wiped ? ' wiped' : ''}`}
             >
               <span className="finale-rank">{isUp ? '✓' : i + 1}</span>

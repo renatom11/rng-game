@@ -290,6 +290,22 @@ const SIRDAR_BIOS = [
   'Has summited more times than these clients have packed correctly.',
 ];
 
+/**
+ * Draw a bio template nobody in this race has used yet — four climbers to a
+ * squad against a ten-template pool made repeats common enough to notice.
+ * When the pool runs dry the cycle restarts, so huge fields stay varied.
+ */
+function pickBioTemplate(rng: RNG, pool: string[], used: Set<string>): string {
+  let fresh = pool.filter((t) => !used.has(t));
+  if (fresh.length === 0) {
+    for (const t of pool) used.delete(t);
+    fresh = pool;
+  }
+  const chosen = pick(rng, fresh);
+  used.add(chosen);
+  return chosen;
+}
+
 function fillBio(rng: RNG, template: string, hometown: string): string {
   const out = template
     .replace(/\{job\}/g, pick(rng, JOBS))
@@ -325,6 +341,7 @@ export function drawClimber(
   heritage: Heritage,
   role: string,
   usedNames: Set<string>,
+  usedBios: Set<string>,
 ): Climber {
   const gender: 0 | 1 = rng() < 0.5 ? 0 : 1;
   const firsts = gender === 1 ? heritage.firstF : heritage.firstM;
@@ -354,7 +371,7 @@ export function drawClimber(
     flag: heritage.flag,
     age: randInt(rng, 21, 58),
     hometown,
-    bio: fillBio(rng, pick(rng, BIO_TEMPLATES), hometown),
+    bio: fillBio(rng, pickBioTemplate(rng, BIO_TEMPLATES, usedBios), hometown),
     look: drawLook(rng, heritage.skinBand, gender),
   };
 }
@@ -370,6 +387,7 @@ export function drawSirdar(
   rng: RNG,
   givenName: string,
   usedNames: Set<string>,
+  usedBios: Set<string>,
 ): Climber {
   const gender: 0 | 1 = SHERPA_HERITAGE.maleOnly.includes(givenName)
     ? 0
@@ -390,7 +408,7 @@ export function drawSirdar(
     flag: SHERPA_HERITAGE.flag,
     age: randInt(rng, 26, 55),
     hometown,
-    bio: fillBio(rng, pick(rng, SIRDAR_BIOS), hometown),
+    bio: fillBio(rng, pickBioTemplate(rng, SIRDAR_BIOS, usedBios), hometown),
     look: drawLook(rng, SHERPA_HERITAGE.skinBand, gender),
   };
 }

@@ -351,6 +351,24 @@ export function MountainMap({ snap, teamNames, tMs, durationMs, selected, onSele
           </g>
         ))}
 
+        {/* A quiet cheer: brief expanding halos at the peak as teams arrive */}
+        {(() => {
+          const rings: { key: string; color: string }[] = [];
+          for (const e of snap.events) {
+            if (e.tMs > tMs) break;
+            if (e.type === 'summit' && e.teamIdx !== undefined && tMs - e.tMs < 3600) {
+              rings.push({ key: `${e.teamIdx}-${e.tMs}`, color: snap.colors[e.teamIdx] });
+            }
+          }
+          const [sx, sy] = NODE_XY['SUMMIT'];
+          return rings.map((c) => (
+            <g key={c.key} aria-hidden pointerEvents="none">
+              <circle cx={sx} cy={sy} r={10} className="mtn-cheer" style={{ stroke: c.color }} />
+              <circle cx={sx} cy={sy} r={10} className="mtn-cheer mtn-cheer-b" style={{ stroke: c.color }} />
+            </g>
+          ));
+        })()}
+
         {/* Team markers — headlamps on after dark */}
         {markers.map((m) => {
           const state = states[m.teamIdx];

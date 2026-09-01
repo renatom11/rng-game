@@ -577,6 +577,10 @@ button { font-family: inherit; }
   font-weight: 420;
   line-height: 1.45;
   opacity: 0.92;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 .dossier-vitals { font-size: 0.66rem; color: var(--snow-dim); font-family: var(--font-data); letter-spacing: -0.03em; margin-top: 2px; }
 .dossier-vitals strong { color: var(--ice); font-weight: 640; }
@@ -621,11 +625,11 @@ button { font-family: inherit; }
 .memorial-when { font-size: 0.62rem; color: var(--snow-dim); font-family: var(--font-data); }
 
 /* ---------- meters ---------- */
-.meterlist { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.5rem; }
-.meterlist li { display: grid; grid-template-columns: 92px 1fr 30px; gap: 0.55rem; align-items: center; font-size: 0.72rem; }
+.meterlist { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.6rem; }
+.meterlist li { display: grid; grid-template-columns: 92px 1fr 32px; gap: 0.55rem; align-items: center; font-size: 0.72rem; }
 .meter-label { color: var(--snow-dim); letter-spacing: 0.02em; }
 .meter-bar {
-  height: 9px;
+  height: 12px;
   background:
     repeating-linear-gradient(90deg, transparent 0 calc(25% - 1px), rgba(150, 180, 226, 0.12) calc(25% - 1px) 25%),
     rgba(7, 12, 22, 0.9);
@@ -643,9 +647,42 @@ button { font-family: inherit; }
 }
 .meter-bar span.mid { background: linear-gradient(90deg, #b57f2f, var(--warn)); box-shadow: 0 0 8px rgba(232, 165, 75, 0.4); }
 .meter-bar span.low { background: linear-gradient(90deg, #c23a31, var(--danger)); box-shadow: 0 0 10px rgba(255, 98, 87, 0.5); }
-.meter-val { text-align: right; font-family: var(--font-data); font-size: 0.66rem; color: var(--snow-2); }
-.readiness-line { margin-top: 0.75rem; font-size: 0.8rem; color: var(--snow-dim); }
-.readiness-line strong { color: var(--gold-hi); font-family: var(--font-data); font-size: 0.85rem; }
+.meter-val { text-align: right; font-family: var(--font-data); font-size: 0.7rem; color: var(--snow-2); }
+
+/* readiness dial — the headline number of a team card */
+.team-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  margin-bottom: 0.35rem;
+}
+.team-card-head h3 { max-width: 34ch; }
+.team-card-meters { margin-top: 0.8rem; padding-top: 0.7rem; border-top: 1px solid var(--line-1); }
+.team-card-meters h3 { margin-bottom: 0.45rem; }
+.meterlist-2col { grid-template-columns: 1fr 1fr; column-gap: 1.2rem; }
+.ready-gauge-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+  flex: none;
+}
+.ready-gauge { width: 86px; height: 78px; overflow: visible; }
+.ready-gauge-arc { transition: stroke-dasharray 700ms ease, stroke 700ms ease; }
+.ready-gauge-num {
+  fill: var(--snow);
+  font-family: var(--font-data);
+  font-size: 15px;
+  font-weight: 600;
+}
+.ready-gauge-pct { fill: var(--snow-dim); font-family: var(--font-data); font-size: 7.5px; letter-spacing: 0.1em; }
+.ready-gauge-caption {
+  font-size: 0.66rem;
+  color: var(--snow-dim);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
 
 /* ---------- map: death sites + legend ---------- */
 .mtn-death {
@@ -675,15 +712,16 @@ button { font-family: inherit; }
   border: 1px solid rgba(233, 188, 99, 0.4);
   border-radius: var(--radius);
   box-shadow: 0 18px 44px -22px rgba(233, 188, 99, 0.25), var(--panel-shadow);
-  padding: 0.85rem 1rem;
+  padding: 0.55rem 0.9rem;
   margin-bottom: 0.9rem;
   display: grid;
   gap: 0.55rem;
   backdrop-filter: blur(10px);
 }
-.code-banner-head { display: grid; gap: 0.15rem; font-size: 0.8rem; }
-.code-banner-head strong { color: var(--gold-hi); font-family: var(--font-display); letter-spacing: 0.02em; }
-.code-banner-head span { color: var(--snow-dim); font-size: 0.74rem; line-height: 1.5; }
+.code-banner-row { display: flex; align-items: center; gap: 0.7rem; flex-wrap: wrap; }
+.code-banner-mark { color: var(--gold-hi); font-size: 1.05rem; line-height: 1; }
+.code-banner-lede { color: var(--snow-dim); font-size: 0.78rem; line-height: 1.45; flex: 1 1 300px; min-width: 0; }
+.code-banner-lede strong { color: var(--gold-hi); font-family: var(--font-display); letter-spacing: 0.02em; font-weight: 560; }
 .code-banner-code {
   display: block;
   font-family: var(--font-data);
@@ -699,16 +737,18 @@ button { font-family: inherit; }
   user-select: all;
   color: var(--snow-dim);
 }
-.code-banner-actions { display: flex; gap: 0.5rem; }
+.code-banner-actions { display: flex; gap: 0.45rem; flex: none; }
+.code-banner-actions .share-btn { padding: 0.32rem 0.75rem; font-size: 0.76rem; }
 .code-banner-dismiss {
   background: none;
   border: 1px solid var(--line-2);
   color: var(--snow-dim);
   border-radius: 9px;
-  padding: 0.35rem 0.75rem;
+  padding: 0.32rem 0.7rem;
   cursor: pointer;
-  font-size: 0.78rem;
+  font-size: 0.76rem;
   font-family: inherit;
+  white-space: nowrap;
   transition: color 140ms, border-color 140ms;
 }
 .code-banner-dismiss:hover { color: var(--snow); border-color: var(--line-3); }
@@ -928,6 +968,12 @@ button { font-family: inherit; }
   box-shadow: 0 0 40px -10px rgba(233, 188, 99, 0.35), var(--panel-shadow);
 }
 .results-row.podium-1 .results-place { color: var(--gold-hi); text-shadow: 0 0 18px rgba(233, 188, 99, 0.6); }
+.results-row.podium-1 .results-name { font-family: var(--font-display); font-weight: 560; font-size: 1.2rem; }
+.results-row.podium-1 .results-time { color: var(--gold-hi); }
+.results-row.podium-2 { border-color: rgba(196, 210, 228, 0.4); }
+.results-row.podium-2 .results-place { color: #dbe6f2; text-shadow: 0 0 14px rgba(219, 230, 242, 0.45); }
+.results-row.podium-3 { border-color: rgba(199, 148, 96, 0.4); }
+.results-row.podium-3 .results-place { color: #d8a878; text-shadow: 0 0 14px rgba(216, 168, 120, 0.45); }
 .results-row.wiped { opacity: 0.55; }
 .results-place {
   font-family: var(--font-display);
@@ -1179,8 +1225,34 @@ button { font-family: inherit; }
 .mtn-headlamp { animation: lampFlicker 2.8s ease-in-out infinite; }
 @keyframes lampFlicker { 0%, 100% { opacity: 1; } 47% { opacity: 0.82; } 53% { opacity: 0.95; } 71% { opacity: 0.85; } }
 
+/* summit cheer: an expanding halo when a team arrives */
+.mtn-cheer {
+  fill: none;
+  stroke-width: 2.5;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: cheer 2s ease-out both;
+}
+.mtn-cheer-b { animation-delay: 0.5s; }
+@keyframes cheer {
+  from { transform: scale(0.35); opacity: 0.95; }
+  to { transform: scale(3.6); opacity: 0; }
+}
+
+/* finale vignette: the edges fall away, the mountain holds the light */
+.map-pane { position: relative; }
+.is-finale .map-pane::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border-radius: inherit;
+  background: radial-gradient(115% 92% at 50% 40%, transparent 52%, rgba(2, 5, 12, 0.52) 100%);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .mtn-cloud-a, .mtn-cloud-b, .mtn-star-twinkle, .mtn-beacon, .mtn-plume, .mtn-headlamp {
     animation: none;
   }
+  .mtn-cheer { animation: none; opacity: 0; }
 }

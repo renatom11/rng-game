@@ -36,6 +36,9 @@ export function buildSquads(
     return deck[di++];
   };
   const usedNames = new Set<string>();
+  // Separate cycles: sirdar bios and client bios come from different pools.
+  const usedBios = new Set<string>();
+  const usedSirdarBios = new Set<string>();
 
   const climbers: Climber[][] = [];
   const sirdar: string[] = [];
@@ -47,9 +50,9 @@ export function buildSquads(
     for (let c = 0; c < SQUAD_SIZE; c++) {
       const role = SQUAD_ROLES[c];
       if (role === 'Sirdar') {
-        squad.push(drawSirdar(rng, sirdarName, usedNames));
+        squad.push(drawSirdar(rng, sirdarName, usedNames, usedSirdarBios));
       } else {
-        squad.push(drawClimber(rng, nextHeritage(), role, usedNames));
+        squad.push(drawClimber(rng, nextHeritage(), role, usedNames, usedBios));
       }
     }
     climbers.push(squad);

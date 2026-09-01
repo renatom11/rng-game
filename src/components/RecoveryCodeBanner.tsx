@@ -8,10 +8,14 @@ import { useEffect, useState } from 'react';
  * code rebuilds the race — same outcome, same story, same link — on any
  * Summit server, so the host can never lose a race to a crash. It contains
  * the sealed ending, so it is never shown again and never served by the API.
+ *
+ * Collapsed to a single row so it never crowds the race out of the
+ * viewport; the code itself is revealed on demand.
  */
 export function RecoveryCodeBanner({ slug }: { slug: string }) {
   const [code, setCode] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [open, setOpen] = useState(false);
 
   useEffect(() => {
     try {
@@ -28,7 +32,8 @@ export function RecoveryCodeBanner({ slug }: { slug: string }) {
       await navigator.clipboard.writeText(code);
       setCopied(true);
     } catch {
-      // selection fallback: the code is visible below
+      // clipboard unavailable — reveal the code for manual selection
+      setOpen(true);
     }
   };
   const dismiss = () => {
@@ -42,23 +47,27 @@ export function RecoveryCodeBanner({ slug }: { slug: string }) {
 
   return (
     <div className="code-banner" role="note">
-      <div className="code-banner-head">
-        <strong>Recovery code — save this somewhere safe.</strong>
-        <span>
-          It can rebuild this race, mid-flight, on any Summit server if
-          anything ever crashes. Shown only once, only to you. It contains
-          the sealed ending — keep it, don&apos;t decode it.
+      <div className="code-banner-row">
+        <span className="code-banner-mark" aria-hidden>
+          ⛨
         </span>
+        <span className="code-banner-lede">
+          <strong>Recovery code.</strong> Rebuilds this race — sealed ending
+          intact — on any Summit server. Shown once, only to you.
+        </span>
+        <div className="code-banner-actions">
+          <button className="share-btn" onClick={copy}>
+            {copied ? 'Copied ✓' : 'Copy code'}
+          </button>
+          <button className="code-banner-dismiss" onClick={() => setOpen((o) => !o)}>
+            {open ? 'Hide' : 'Show'}
+          </button>
+          <button className="code-banner-dismiss" onClick={dismiss}>
+            {copied ? 'Dismiss' : 'I saved it — dismiss'}
+          </button>
+        </div>
       </div>
-      <code className="code-banner-code">{code}</code>
-      <div className="code-banner-actions">
-        <button className="share-btn" onClick={copy}>
-          {copied ? 'Copied ✓' : 'Copy code'}
-        </button>
-        <button className="code-banner-dismiss" onClick={dismiss}>
-          I saved it — dismiss
-        </button>
-      </div>
+      {open && <code className="code-banner-code">{code}</code>}
     </div>
   );
 }
