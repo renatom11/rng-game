@@ -20,15 +20,15 @@ import type { JourneySnapshot } from '@/lib/slice';
 import { displayPosAt, edgeChoicesAt, teamStatesAt, teamTags } from '@/lib/client/raceState';
 import { sceneLight } from '@/themes/everest/scene';
 import {
-  buildBranches,
+  branches3D,
   buildContours,
   buildFarRange,
   buildTerrain,
   CAM_PRESETS,
   CAM_SUMMIT_WIDE,
   heightAt,
-  posToXYZ,
-  ROUTE3,
+  posToXYZOn,
+  segIndexAt,
   sunDir,
   WP3,
 } from '@/themes/everest/terrain3d';
@@ -55,8 +55,6 @@ const LABELS: { id: string; name: string; alt: string; tier: 0 | 1 }[] = [
   { id: 'SUMMIT', name: 'Summit', alt: '8,849 m', tier: 0 },
 ];
 
-/** Start frac of each route segment, for "which leg is this team on". */
-const ROUTE_SEG_FRACS = [0, 0.16, 0.32, 0.52, 0.7, 0.82, 0.92, 0.96];
 
 /** A team is a light, not a badge: bright core, color ring, soft falloff. */
 function lightTexture(color: string): THREE.CanvasTexture {
@@ -116,6 +114,26 @@ function moonTexture(): THREE.CanvasTexture {
   g.beginPath(); g.arc(57, 58, 7, 0, Math.PI * 2); g.fill();
   g.beginPath(); g.arc(70, 68, 5, 0, Math.PI * 2); g.fill();
   g.globalAlpha = 1;
+  return new THREE.CanvasTexture(c);
+}
+
+/** A death site: a hard X with a dark rim, so it reads on snow and on rock. */
+function crossTexture(color: string): THREE.CanvasTexture {
+  const c = document.createElement('canvas');
+  c.width = c.height = 64;
+  const g = c.getContext('2d')!;
+  g.lineCap = 'round';
+  const arm = 17;
+  const draw = (w: number, style: string) => {
+    g.lineWidth = w;
+    g.strokeStyle = style;
+    g.beginPath();
+    g.moveTo(32 - arm, 32 - arm); g.lineTo(32 + arm, 32 + arm);
+    g.moveTo(32 + arm, 32 - arm); g.lineTo(32 - arm, 32 + arm);
+    g.stroke();
+  };
+  draw(13, 'rgba(6, 10, 20, 0.92)'); // rim first: the mark keeps its edge on snow
+  draw(6, color);
   return new THREE.CanvasTexture(c);
 }
 
@@ -581,17 +599,26 @@ float tnoise(vec2 p){
     // Every leg offers a safe, a normal and a risky line. They are drawn as
     // three distinct paths on the mountain so the choice each team makes is
     // visible in the world, not just in the feed.
-    const routePts = ROUTE3.map((p) => new THREE.Vector3(p.x, p.y + 14, p.z));
-    const fixedLine = new THREE.Line(
-      new THREE.BufferGeometry().setFromPoints(routePts),
-      new THREE.LineBasicMaterial({ color: '#8a7a52', transparent: true, opacity: 0.3, depthWrite: false }),
-    );
-    scene.add(fixedLine);
-
-    const RISK_COLOR: Record<string, string> = {
-      safe: '#5fd0a8',
-      medium: '#e8b957',
-      risky: '#ef6a5c',
+    // Grades read as dark ink on sunlit snow. The old mint/amber/salmon were
+    // brighter than the mountain they were drawn on, so three of them over a
+    // white face composited to pastel mush; after dark they lift toward lamp
+    // colour so they don't sink into the massif. (The canonical spine that used
+    // to be drawn alongside them is gone — it was a fifth line per leg
+    // belonging to no grade and no team.)
+    const RISK_DAY: Record<string, string> = {
+      safe: '#2f8f6b',
+      medium: '#b3801f',
+      risky: '#c2453a',
+    };
+    const RISK_NIGHT: Record<string, string> = {
+      safe: '#7fe0bb',
+      medium: '#f2cc72',
+      risky: '#ff8f81',
+    };
+    const RISK_RGB: Record<string, { day: THREE.Color; night: THREE.Color }> = {
+      safe: { day: new THREE.Color(RISK_DAY.safe), night: new THREE.Color(RISK_NIGHT.safe) },
+      medium: { day: new THREE.Color(RISK_DAY.medium), night: new THREE.Color(RISK_NIGHT.medium) },
+      risky: { day: new THREE.Color(RISK_DAY.risky), night: new THREE.Color(RISK_NIGHT.risky) },
     };
     // Ribbons, not lines: GL clamps line width to one pixel on nearly every
     // driver, so a hairline vanishes at altitude. A flat strip laid on the
@@ -621,31 +648,36 @@ float tnoise(vec2 p){
       g.computeVertexNormals();
       return g;
     };
-    const branchLines = buildBranches().map((br) => {
+    const branchLines = branches3D().map((br) => {
       const mat = new THREE.MeshBasicMaterial({
-        color: RISK_COLOR[br.risk],
+        color: RISK_DAY[br.risk],
         transparent: true,
-        opacity: 0.5,
+        opacity: 0.24,
         depthWrite: false,
         side: THREE.DoubleSide,
       });
-      const ribbon = new THREE.Mesh(ribbonGeo(br.points, 17), mat);
+      // 18 m wide, not 34: a marked climbing line, not a painted road. Every
+      // lane tapers to the same point at each camp, so three wide strips
+      // stacked into a colour blob at BC, C1, C2, C3, C4 and the Balcony.
+      const ribbon = new THREE.Mesh(ribbonGeo(br.points, 9), mat);
       ribbon.renderOrder = 6;
       scene.add(ribbon);
-      // A wider, softer twin so an active line reads as lit rope after dark.
+      // The soft twin belongs to the live line AFTER DARK only: additive light
+      // over sunlit snow has nowhere to go but white, which is the smear.
       const glowMat = new THREE.MeshBasicMaterial({
-        color: RISK_COLOR[br.risk],
+        color: RISK_NIGHT[br.risk],
         transparent: true,
         opacity: 0,
         depthWrite: false,
         blending: THREE.AdditiveBlending,
         side: THREE.DoubleSide,
       });
-      const glow = new THREE.Mesh(ribbonGeo(br.points, 40), glowMat);
+      const glow = new THREE.Mesh(ribbonGeo(br.points, 24), glowMat);
       glow.renderOrder = 7;
       glow.position.y = 6;
+      glow.visible = false;
       scene.add(glow);
-      return { br, mat, glowMat };
+      return { br, mat, glowMat, glow };
     });
 
     // --- camps ----------------------------------------------------------
@@ -807,6 +839,63 @@ float tnoise(vec2 p){
       return el;
     });
 
+    // --- death sites ------------------------------------------------------
+    // Where the mountain took someone. Until now there was no mark at all in
+    // 3D — a lost team was simply hidden — which is why deaths could not be
+    // seen. Each site is placed on the line that team was actually on at the
+    // time and kept for the rest of the race: the record of the climb is part
+    // of the climb. Read-only over already-delivered events.
+    interface DeathSite {
+      x: number; y: number; z: number; color: string; tMs: number; big: boolean;
+    }
+    let deathSites: DeathSite[] = [];
+    const deathGroup = new THREE.Group();
+    scene.add(deathGroup);
+    const deathSprites: THREE.Sprite[] = [];
+    const crossTexCache = new Map<string, THREE.CanvasTexture>();
+    const crossTexFor = (color: string) => {
+      let t = crossTexCache.get(color);
+      if (!t) { t = crossTexture(color); crossTexCache.set(color, t); }
+      return t;
+    };
+    /**
+     * One pass over the delivered events: track each team's live fork choice
+     * and stamp a site wherever a climber or a whole expedition was lost.
+     */
+    const rebuildDeaths = (
+      snap: JourneySnapshot,
+      nTeams: number,
+      tMs: number,
+    ): DeathSite[] => {
+      const choice: (string | null)[][] = Array.from({ length: nTeams }, () =>
+        new Array<string | null>(nSegs).fill(null),
+      );
+      const sites: DeathSite[] = [];
+      for (const e of snap.events) {
+        if (e.tMs > tMs) break;
+        if (e.teamIdx === undefined) continue;
+        if (e.type === 'fork_choice' && e.edgeId) {
+          const seg = segByEdge.get(e.edgeId);
+          if (seg !== undefined) choice[e.teamIdx][seg] = e.edgeId;
+          continue;
+        }
+        if (e.type !== 'climber_fall' && e.type !== 'team_wipeout') continue;
+        const dp = displayPosAt(snap, e.teamIdx, e.tMs);
+        const [dx, dy, dz] = posToXYZOn(dp, choice[e.teamIdx][segIndexAt(dp)]);
+        const k = sites.length;
+        // Fan co-located marks apart: a wipeout loses a whole rope at one point.
+        sites.push({
+          x: dx + ((k % 3) - 1) * 26,
+          y: dy + 16,
+          z: dz + (k % 2) * 22 - 11,
+          color: snap.colors[e.teamIdx],
+          tMs: e.tMs,
+          big: e.type === 'team_wipeout',
+        });
+      }
+      return sites;
+    };
+
     // --- interaction ----------------------------------------------------
     let lastInteract = -1e9;
     const onStart = () => {
@@ -877,8 +966,14 @@ float tnoise(vec2 p){
     let states: ReturnType<typeof teamStatesAt> = [];
     let stormNow = 0;
     let finaleStage = -1;
-    const segByEdge = new Map(branchLines.map(({ br }) => [br.id, br.segIdx]));
+    const segByEdge = new Map<string, number>(
+      branchLines.map(({ br }) => [br.id, br.segIdx] as [string, number]),
+    );
     let liveEdges = new Set<string>();
+    const nSegs = Math.max(...segByEdge.values()) + 1;
+    // Which line each team is standing on, so the light can ride the ribbon it
+    // chose instead of the canonical route nobody is drawn on.
+    let edgeChoices: (string | null)[][] = [];
 
     const stormAt = (tMs: number) => {
       let best = 0;
@@ -916,17 +1011,17 @@ float tnoise(vec2 p){
         lastTick = tick;
         states = teamStatesAt(p.snap, p.teamNames.length, p.tMs);
         stormNow = stormAt(p.tMs);
-        // Which lines are carrying climbers right now.
-        const choices = edgeChoicesAt(p.snap, p.teamNames.length, p.tMs, segByEdge);
+        // Which lines are carrying climbers right now — kept, not discarded,
+        // because the team loop needs the same answer to place each marker.
+        edgeChoices = edgeChoicesAt(p.snap, p.teamNames.length, p.tMs, segByEdge);
         const live = new Set<string>();
-        for (let i = 0; i < choices.length; i++) {
+        for (let i = 0; i < edgeChoices.length; i++) {
           if (states[i]?.wiped) continue;
-          const pos = displayPosAt(p.snap, i, p.tMs);
-          const segNow = ROUTE_SEG_FRACS.findIndex((f, k) => pos >= f && pos < (ROUTE_SEG_FRACS[k + 1] ?? 2));
-          const id = choices[i][segNow < 0 ? 0 : segNow];
+          const id = edgeChoices[i][segIndexAt(displayPosAt(p.snap, i, p.tMs))];
           if (id) live.add(id);
         }
         liveEdges = live;
+        deathSites = rebuildDeaths(p.snap, p.teamNames.length, p.tMs);
       }
 
       // Light of the hour.
@@ -1035,10 +1130,16 @@ float tnoise(vec2 p){
       // carrying climbers right now glow.
       {
         const vis = 1 - white;
-        for (const { br, mat, glowMat } of branchLines) {
+        for (const { br, mat, glowMat, glow } of branchLines) {
           const on = liveEdges.has(br.id);
-          mat.opacity = vis * (on ? 0.95 : 0.4 + L.darkness * 0.14);
-          glowMat.opacity = on ? vis * (0.28 + L.darkness * 0.3) : 0;
+          const rgb = RISK_RGB[br.risk];
+          mat.color.copy(rgb.day).lerp(rgb.night, L.darkness);
+          // A 3x separation, not 0.5 against 0.95: idle grades are a hint, the
+          // line under someone's boots is the one that reads.
+          mat.opacity = vis * (on ? 0.7 : 0.22 + L.darkness * 0.12);
+          const g = on ? vis * L.darkness * 0.34 : 0;
+          glowMat.opacity = g;
+          glow.visible = g > 0.01;
         }
       }
       // Spindrift is the mountain's resting pulse; storms turn it feral.
@@ -1108,7 +1209,8 @@ float tnoise(vec2 p){
       }
       for (let i = 0; i < teamGroups.length; i++) {
         const pos = displayPosAt(p.snap, i, p.tMs);
-        let [x, y, z] = posToXYZ(pos);
+        const edgeNow = edgeChoices[i]?.[segIndexAt(pos)] ?? null;
+        let [x, y, z] = posToXYZOn(pos, edgeNow);
         // A team that has topped out leaves the mountain: its light, beam
         // and tag are removed rather than parked on the summit, where a
         // growing pile of dots buried the peak it just earned. The summit
@@ -1122,11 +1224,23 @@ float tnoise(vec2 p){
           tagEls[i].style.opacity = '0';
           continue;
         }
-        grp.position.set(x, y + 26, z);
+        // Branch points already sit 22 m proud of the snow, so the light needs
+        // only enough lift to clear its own ribbon.
+        grp.position.set(x, y + 14, z);
         grp.userData.parked = parked;
         const st = states[i];
-        const wiped = st?.wiped ?? false;
-        const visMul = (1 - white) * (wiped ? 0.35 : 1);
+        if (st?.wiped) {
+          // A lost expedition is its mark, not a dimmed light. Half-lighting a
+          // dot that still reads as a climbing team is what made deaths
+          // invisible; the cross below carries the team colour and stays.
+          grp.visible = false;
+          grp.userData.parked = true;
+          (trailLines[i].material as THREE.LineBasicMaterial).opacity = 0;
+          tagEls[i].style.opacity = '0';
+          continue;
+        }
+        const wiped = false;
+        const visMul = 1 - white;
         dotSprites[i].scale.set(dotScale, dotScale, 1);
         dotSprites[i].material.opacity = 0.25 + visMul * 0.75;
         // Brightness is condition; warmth is a headlamp after dark.
@@ -1151,8 +1265,8 @@ float tnoise(vec2 p){
             for (let k = 16; k >= 0; k--) {
               const tp = displayPosAt(p.snap, i, Math.max(0, p.tMs - k * step));
               if (Math.abs(pos - tp) > 0.04) continue;
-              const [tx, ty, tz] = posToXYZ(tp);
-              pts.push(new THREE.Vector3(tx, ty + 22, tz));
+              const [tx, ty, tz] = posToXYZOn(tp, edgeChoices[i]?.[segIndexAt(tp)] ?? null);
+              pts.push(new THREE.Vector3(tx, ty + 10, tz));
             }
           }
           if (pts.length >= 2) {
@@ -1181,6 +1295,37 @@ float tnoise(vec2 p){
             g.position.addScaledVector(right, side * mag);
           }
         }
+      }
+
+      // Death sites: constant screen size so they read at any zoom, a short
+      // flare as they happen, then a permanent quiet mark.
+      for (let k = 0; k < deathSites.length; k++) {
+        const d = deathSites[k];
+        let sp = deathSprites[k];
+        if (!sp) {
+          sp = new THREE.Sprite(
+            new THREE.SpriteMaterial({
+              transparent: true, depthWrite: false, depthTest: false,
+              sizeAttenuation: false,
+            }),
+          );
+          sp.renderOrder = 26; // under the living lights, over the world
+          deathSprites[k] = sp;
+          deathGroup.add(sp);
+        }
+        const m = sp.material as THREE.SpriteMaterial;
+        const tex = crossTexFor(d.color);
+        if (m.map !== tex) { m.map = tex; m.needsUpdate = true; }
+        sp.visible = true;
+        sp.position.set(d.x, d.y, d.z);
+        const fresh = Math.max(0, 1 - (p.tMs - d.tMs) / 6000);
+        const base = (d.big ? 30 : 22) + fresh * 16;
+        const s = Math.min(0.1, (2 * base) / px);
+        sp.scale.set(s, s, 1);
+        m.opacity = (0.62 + fresh * 0.38) * (1 - white * 0.7);
+      }
+      for (let k = deathSites.length; k < deathSprites.length; k++) {
+        deathSprites[k].visible = false;
       }
 
       // Selection ring.
@@ -1350,9 +1495,9 @@ float tnoise(vec2 p){
     <div className="m3d-wrap" ref={wrapRef}>
       <div className="m3d-labels" ref={labelsRef} aria-hidden />
       <div className="m3d-legend" aria-hidden>
-        <span><i style={{ background: '#5fd0a8' }} />safe</span>
-        <span><i style={{ background: '#e8b957' }} />normal</span>
-        <span><i style={{ background: '#ef6a5c' }} />risky</span>
+        <span><i style={{ background: '#2f8f6b' }} />safe</span>
+        <span><i style={{ background: '#b3801f' }} />normal</span>
+        <span><i style={{ background: '#c2453a' }} />risky</span>
       </div>
       <div className="m3d-snap" role="group" aria-label="Camera views">
         {CAM_PRESETS.map((c) => (

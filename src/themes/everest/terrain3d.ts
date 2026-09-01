@@ -460,6 +460,68 @@ export function buildBranches(): Branch3D[] {
   return out;
 }
 
+/**
+ * The branch set, built once. Decoration only: a lookup over geometry derived
+ * from already-served data — nothing here can reach `core`.
+ */
+let _branches: Branch3D[] | null = null;
+let _branchById: Map<string, Branch3D> | null = null;
+
+export function branches3D(): Branch3D[] {
+  if (!_branches) _branches = buildBranches();
+  return _branches;
+}
+
+function branchById(id: string): Branch3D | undefined {
+  if (!_branchById) _branchById = new Map(branches3D().map((b) => [b.id, b]));
+  return _branchById.get(id);
+}
+
+/** [startFrac, endFrac] of each route segment, from the shared route model. */
+export const SEG_FRACS: [number, number][] = SEGMENTS.map((s) => [
+  WP_FRAC[s.from],
+  WP_FRAC[s.to],
+]);
+
+/** Index of the segment containing a route-display position. */
+export function segIndexAt(pos: number): number {
+  for (let i = 0; i < SEG_FRACS.length; i++) {
+    if (pos <= SEG_FRACS[i][1] + 1e-9) return i;
+  }
+  return SEG_FRACS.length - 1;
+}
+
+/**
+ * A point on the line a team is ACTUALLY on: the chosen branch's polyline when
+ * the fork choice is known, the canonical route otherwise.
+ *
+ * These are different curves. posToXYZ walks ROUTE3, the canonical
+ * switchbacking polyline; the ribbons come from buildBranches, which offsets
+ * lanes off the straight chord between waypoints. In the Western Cwm that put
+ * the canonical line exactly down the empty middle between the two drawn
+ * ribbons — every marker 210 m from both, touching neither, which is what
+ * "the dots don't follow the paths" was. Branches taper to zero at both
+ * waypoints, so this stays continuous across segment boundaries and when a
+ * team changes line between legs.
+ */
+export function posToXYZOn(
+  pos: number,
+  edgeId: string | null | undefined,
+): [number, number, number] {
+  const br = edgeId ? branchById(edgeId) : undefined;
+  if (!br) return posToXYZ(pos);
+  const [f0, f1] = SEG_FRACS[br.segIdx];
+  const t = Math.max(0, Math.min(1, (pos - f0) / (f1 - f0 || 1)));
+  const pts = br.points;
+  const u = t * (pts.length - 1);
+  const i = Math.min(pts.length - 2, Math.max(0, Math.floor(u)));
+  const k = u - i;
+  const a = pts[i];
+  const b = pts[i + 1];
+  return [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k, a[2] + (b[2] - a[2]) * k];
+}
+
+
 // ---------------------------------------------------------------------------
 // Terrain mesh data: positions + per-vertex albedo, ready for BufferGeometry.
 // ---------------------------------------------------------------------------
