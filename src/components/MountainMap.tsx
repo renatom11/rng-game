@@ -293,10 +293,10 @@ export function MountainMap({ snap, teamNames, tMs, durationMs, selected, onSele
           );
         })}
 
-        {/* Blizzard: the sky closing in while a storm window is open */}
-        {stormIntensity > 0 && (
-          <g className="mtn-blizzard" opacity={stormIntensity} aria-hidden>
-            <rect x={-100} y={-100} width={VIEW_W + 200} height={VIEW_H + 200} fill="#aebfd6" opacity={0.16} />
+        {/* Snowfall is always breathing; a storm closes the sky on top */}
+        {(
+          <g className="mtn-blizzard" opacity={0.22 + stormIntensity * 0.78} aria-hidden>
+            <rect x={-100} y={-100} width={VIEW_W + 200} height={VIEW_H + 200} fill="#aebfd6" opacity={0.16 * stormIntensity} />
             {flakes.map((fl, i) => (
               <line
                 key={i}
