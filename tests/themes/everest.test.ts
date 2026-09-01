@@ -139,6 +139,34 @@ describe('everest theme', () => {
     }
   });
 
+  it('a camp once reached is a floor for the rest of the climb', () => {
+    // Real expeditions do walk all the way back to Base Camp between
+    // rotations, but on screen a squad sliding below a camp it already stood
+    // in — three quarters of the way into the race — reads as losing progress
+    // rather than as resting.
+    for (const t of runs.slice(0, 24)) {
+      const times = t.displayTrack.tMs;
+      const wiped = new Set(t.wipeouts.map((w) => w.teamIdx));
+      for (let team = 0; team < N; team++) {
+        if (wiped.has(team)) continue;
+        const pos = t.displayTrack.pos[team];
+        let floor = 0;
+        let floorLabel = 'the start';
+        for (let i = 0; i < times.length; i++) {
+          expect(
+            pos[i],
+            `team ${team} reached ${floorLabel} but fell back to ${altitudeAt(pos[i]).toFixed(0)}m at ${(times[i] / 60000).toFixed(1)}min`,
+          ).toBeGreaterThanOrEqual(floor - 1e-6);
+          const node = NODES.filter((nd) => nd.frac <= pos[i] + 1e-9).pop();
+          if (node && node.frac > floor) {
+            floor = node.frac;
+            floorLabel = node.label;
+          }
+        }
+      }
+    }
+  });
+
   it('readiness is a cause, not a caption — an empty squad stops climbing', () => {
     // The bar has to MEAN something: a squad with nothing left does not keep
     // strolling uphill. Two failure modes this guards, both of which reduce
