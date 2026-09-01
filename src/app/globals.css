@@ -189,8 +189,27 @@ button { font-family: inherit; }
 .landing {
   max-width: 980px;
   margin: 0 auto;
-  padding: 7vh 1.5rem 4rem;
+  padding: 9vh 1.5rem 4rem;
   text-align: center;
+}
+.landing-scenewrap {
+  /* z-index 0, not -1: html carries a background, so body's paints over any
+     negative-z layer — content lifts to z-index 1 instead. */
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+.landing-hero, .landing-points { position: relative; z-index: 1; }
+.landing-scene { width: 100%; height: 100%; display: block; }
+.landing-scenewrap::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(90% 62% at 50% 30%, transparent 42%, rgba(5, 9, 18, 0.5) 100%),
+    linear-gradient(180deg, rgba(5, 9, 18, 0.3) 0%, transparent 26%, rgba(5, 9, 18, 0.78) 72%, var(--bg) 96%);
 }
 .landing-kicker {
   text-transform: uppercase;
@@ -223,6 +242,7 @@ button { font-family: inherit; }
   max-width: 600px;
   margin: 0 auto 2.2rem;
   text-wrap: balance;
+  text-shadow: 0 1px 14px rgba(5, 9, 18, 0.85), 0 0 4px rgba(5, 9, 18, 0.6);
 }
 .landing-ctas { display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap; }
 .landing-points {
