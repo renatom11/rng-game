@@ -189,7 +189,9 @@ export function MountainMap3D(props: Props) {
     tGeo.computeVertexNormals();
     const terrainMat = new THREE.MeshLambertMaterial({
       vertexColors: true,
-      flatShading: true,
+      // Smooth normals: flat shading made every grid-aliased crest facet
+      // flash light/dark; the color noise keeps the painterly variation.
+      flatShading: false,
       // Give contours and the route room on the surface.
       polygonOffset: true,
       polygonOffsetFactor: 1,
@@ -578,10 +580,11 @@ export function MountainMap3D(props: Props) {
         const pos = displayPosAt(p.snap, i, p.tMs);
         let [x, y, z] = posToXYZ(pos);
         if (pos >= 0.9999) {
+          // Down the northwest shoulder in arrival order, feet on snow.
           const k = Math.max(0, summitOrder.indexOf(i));
-          x += -k * 66 - 20;
-          z += -k * 34;
-          y = WP3.SUMMIT[1] - 4 - k * 16;
+          x += -k * 52 - 14;
+          z += -k * 30 - 8;
+          y = heightAt(x, z);
         }
         const grp = teamGroups[i];
         grp.position.set(x, y + 26, z);
@@ -640,10 +643,10 @@ export function MountainMap3D(props: Props) {
       if (p.finale) {
         let stage = 0;
         if (leadFrac > 0.905) stage = 1; // leader past South Summit: to the ridge
-        const summitedNow = p.snap.events.some(
-          (e) => e.type === 'summit' && e.tMs <= p.tMs && p.tMs - e.tMs < 2400,
+        const anySummit = p.snap.events.some(
+          (e) => e.type === 'summit' && e.tMs <= p.tMs,
         );
-        if (summitedNow) stage = 2; // first arrivals: the pull-back
+        if (anySummit) stage = 2; // the top of the world: pull back and hold
         if (stage !== finaleStage && now - lastInteract > 8000) {
           finaleStage = stage;
           if (modeRef.current !== 'ambient') setMode('ambient');

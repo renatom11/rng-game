@@ -183,8 +183,8 @@ function distToSeg(x: number, z: number, ax: number, az: number, bx: number, bz:
 function boneHeight(x: number, z: number): number {
   let h = FLOOR;
   // Soft-max: hard max() creases alias into sawtooth silhouettes where
-  // primitives cross; a 45 m blend rounds every crest painterly-smooth.
-  const K = 45;
+  // primitives cross; a 75 m blend rounds every crest painterly-smooth.
+  const K = 75;
   const put = (v: number) => {
     const m = Math.max(h, v);
     const n = Math.min(h, v);
@@ -291,7 +291,7 @@ export function heightAt(x: number, z: number): number {
 // ---------------------------------------------------------------------------
 
 export const GRID = {
-  x0: -5400, x1: 2500, z0: -1700, z1: 3950, nx: 190, nz: 138,
+  x0: -5400, x1: 2500, z0: -1700, z1: 3950, nx: 290, nz: 210,
 };
 
 function hex(c: string): [number, number, number] {
