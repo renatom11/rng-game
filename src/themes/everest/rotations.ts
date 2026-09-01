@@ -186,8 +186,14 @@ export function buildDisplayTrack(
     return c * c * (3 - 2 * c);
   };
 
+  // The earliest summiter anchors the summit-push departure stagger.
+  const stMin = Math.min(...core.summitTimesMs);
+
   for (let team = 0; team < n; team++) {
     const cycles = buildCycles(rng, durationMs, team, n, route.forceShallow ?? false);
+    // Per-team departure texture for the push (drawn here, outside the time
+    // loop, so rng consumption stays deterministic per team).
+    const departWobble = 0.5 + 0.12 * (rng() - 0.5);
 
     // Weather decisions: does this team sit a given storm out at a camp, or
     // gamble and keep climbing through it? Style flavors the choice (and,
@@ -247,20 +253,24 @@ export function buildDisplayTrack(
       let x: number;
 
       if (t >= core.pushStartMs) {
-        // The final act, staged for the screen. Mapping raw p straight onto
-        // the ridge strung the field across the whole upper mountain, so
-        // the ending looked decided the moment it began. Instead each
-        // team's climb is paced by its own summit time under a slow-out
-        // ease: everyone leaves the Col together, the pack stays within a
-        // few rope-lengths of each other through the Balcony, and the gaps
-        // that matter only open in the last metres. A trace of the raw-p
-        // signal survives as texture (stalls and surges), bounded so it can
-        // never un-bunch the field. Summit arrival stays exact to the
-        // millisecond, and none of this touches the engine's staging — the
-        // standings rank by checkpoints, not by pixels.
+        // The final act, staged for the screen — and for the story so far.
+        // Mapping raw p straight onto the ridge strung the field across the
+        // whole upper mountain (the ending looked decided at once); packing
+        // everyone into one departing bunch erased the race instead. So:
+        // departures from the Col are STAGGERED by roughly half of each
+        // team's finishing margin — the leaders clip in and go while the
+        // stragglers are still at their tents, which is the race so far
+        // made visible — and each team then climbs on its own summit-timed
+        // ease, so late departers never quite claw back the front group,
+        // near-rivals duel within a rope-length, and the tail is dropped
+        // low on the ridge when the winner tops out. A bounded trace of
+        // the raw-p signal survives as stall/surge texture. Summit arrival
+        // stays exact to the millisecond, and none of this touches the
+        // engine's staging — standings rank by checkpoints, not pixels.
         const st = core.summitTimesMs[team];
-        const u2 = Math.min(1, (t - core.pushStartMs) / Math.max(1, st - core.pushStartMs));
-        const base = Math.pow(u2, 1.6);
+        const depart = core.pushStartMs + departWobble * (st - stMin);
+        const u2 = Math.max(0, Math.min(1, (t - depart) / Math.max(1, st - depart)));
+        const base = Math.pow(u2, 1.45);
         const affine = (Math.max(p, HOLD_P) - HOLD_P) / (1 - HOLD_P);
         const texture =
           Math.max(-0.035, Math.min(0.035, (affine - base) * 0.3)) * (1 - u2);
