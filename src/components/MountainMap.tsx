@@ -59,11 +59,38 @@ export function MountainMap({ snap, teamNames, tMs, selected, onSelect, finale }
       const [x, y] = markerXY(pos, choices[i]);
       return { teamIdx: i, pos, x, y };
     });
+    // Summited teams park in a tidy cluster under the peak, in arrival
+    // order — the generic overlap fan used to spread a dozen victorious
+    // dots across the whole ridge, which read as chaos, not triumph.
+    const summitOrder: number[] = [];
+    for (const e of snap.events) {
+      if (e.tMs > tMs) break;
+      if (e.type === 'summit' && e.teamIdx !== undefined && !summitOrder.includes(e.teamIdx)) {
+        summitOrder.push(e.teamIdx);
+      }
+    }
+    const atTop = raw.filter((m) => m.pos >= 0.9999);
+    // Events can lag the track by a beat; anyone standing on the top
+    // without a delivered summit line queues after the announced ones.
+    for (const m of atTop) {
+      if (!summitOrder.includes(m.teamIdx)) summitOrder.push(m.teamIdx);
+    }
+    const parked = new Set<number>();
+    const [sx, sy] = NODE_XY['SUMMIT'];
+    for (const m of atTop) {
+      const k = summitOrder.indexOf(m.teamIdx);
+      const row = Math.ceil(k / 2);
+      m.x = sx + (k === 0 ? 0 : (k % 2 === 1 ? -1 : 1) * (8 + row * 7));
+      m.y = sy + (k === 0 ? -2 : 3 + row * 7);
+      parked.add(m.teamIdx);
+    }
+
     // Fan out only dots that genuinely overlap ON SCREEN. Bucketing by
     // progress alone shoved teams sideways even when their chosen routes
     // already separated them — which read as dots wandering off their line.
     const buckets = new Map<string, typeof raw>();
     for (const m of raw) {
+      if (parked.has(m.teamIdx)) continue;
       const key = `${Math.round(m.x / 24)}:${Math.round(m.y / 18)}`;
       const arr = buckets.get(key) ?? [];
       arr.push(m);

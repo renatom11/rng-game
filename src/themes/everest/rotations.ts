@@ -247,10 +247,25 @@ export function buildDisplayTrack(
       let x: number;
 
       if (t >= core.pushStartMs) {
-        // The race line: affine map of p onto Col->Summit, approached with
-        // a bounded catch-up so push start never teleports the marker.
+        // The final act, staged for the screen. Mapping raw p straight onto
+        // the ridge strung the field across the whole upper mountain, so
+        // the ending looked decided the moment it began. Instead each
+        // team's climb is paced by its own summit time under a slow-out
+        // ease: everyone leaves the Col together, the pack stays within a
+        // few rope-lengths of each other through the Balcony, and the gaps
+        // that matter only open in the last metres. A trace of the raw-p
+        // signal survives as texture (stalls and surges), bounded so it can
+        // never un-bunch the field. Summit arrival stays exact to the
+        // millisecond, and none of this touches the engine's staging — the
+        // standings rank by checkpoints, not by pixels.
+        const st = core.summitTimesMs[team];
+        const u2 = Math.min(1, (t - core.pushStartMs) / Math.max(1, st - core.pushStartMs));
+        const base = Math.pow(u2, 1.6);
+        const affine = (Math.max(p, HOLD_P) - HOLD_P) / (1 - HOLD_P);
+        const texture =
+          Math.max(-0.035, Math.min(0.035, (affine - base) * 0.3)) * (1 - u2);
         const target =
-          C4_FRAC + ((Math.max(p, HOLD_P) - HOLD_P) / (1 - HOLD_P)) * (1 - C4_FRAC);
+          C4_FRAC + (1 - C4_FRAC) * Math.max(0, Math.min(1, base + texture));
         x = Math.min(target, lastPos + pushCatch);
         x = Math.max(x, lastPos); // monotone during the push
         if (p >= 1 - 1e-6) x = 1; // the summit moment is exact
