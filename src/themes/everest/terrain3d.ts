@@ -460,6 +460,68 @@ export function buildBranches(): Branch3D[] {
   return out;
 }
 
+/**
+ * The branch set, built once. Decoration only: a lookup over geometry derived
+ * from already-served data — nothing here can reach `core`.
+ */
+let _branches: Branch3D[] | null = null;
+let _branchById: Map<string, Branch3D> | null = null;
+
+export function branches3D(): Branch3D[] {
+  if (!_branches) _branches = buildBranches();
+  return _branches;
+}
+
+function branchById(id: string): Branch3D | undefined {
+  if (!_branchById) _branchById = new Map(branches3D().map((b) => [b.id, b]));
+  return _branchById.get(id);
+}
+
+/** [startFrac, endFrac] of each route segment, from the shared route model. */
+export const SEG_FRACS: [number, number][] = SEGMENTS.map((s) => [
+  WP_FRAC[s.from],
+  WP_FRAC[s.to],
+]);
+
+/** Index of the segment containing a route-display position. */
+export function segIndexAt(pos: number): number {
+  for (let i = 0; i < SEG_FRACS.length; i++) {
+    if (pos <= SEG_FRACS[i][1] + 1e-9) return i;
+  }
+  return SEG_FRACS.length - 1;
+}
+
+/**
+ * A point on the line a team is ACTUALLY on: the chosen branch's polyline when
+ * the fork choice is known, the canonical route otherwise.
+ *
+ * These are different curves. posToXYZ walks ROUTE3, the canonical
+ * switchbacking polyline; the ribbons come from buildBranches, which offsets
+ * lanes off the straight chord between waypoints. In the Western Cwm that put
+ * the canonical line exactly down the empty middle between the two drawn
+ * ribbons — every marker 210 m from both, touching neither, which is what
+ * "the dots don't follow the paths" was. Branches taper to zero at both
+ * waypoints, so this stays continuous across segment boundaries and when a
+ * team changes line between legs.
+ */
+export function posToXYZOn(
+  pos: number,
+  edgeId: string | null | undefined,
+): [number, number, number] {
+  const br = edgeId ? branchById(edgeId) : undefined;
+  if (!br) return posToXYZ(pos);
+  const [f0, f1] = SEG_FRACS[br.segIdx];
+  const t = Math.max(0, Math.min(1, (pos - f0) / (f1 - f0 || 1)));
+  const pts = br.points;
+  const u = t * (pts.length - 1);
+  const i = Math.min(pts.length - 2, Math.max(0, Math.floor(u)));
+  const k = u - i;
+  const a = pts[i];
+  const b = pts[i + 1];
+  return [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k, a[2] + (b[2] - a[2]) * k];
+}
+
+
 // ---------------------------------------------------------------------------
 // Terrain mesh data: positions + per-vertex albedo, ready for BufferGeometry.
 // ---------------------------------------------------------------------------
@@ -529,7 +591,7 @@ export function albedoAt(
   // right across the fluted lower slopes wherever the ribs crossed it.
   const nearBC = Math.max(0, 1 - Math.hypot(x - WP3.BC[0], z - WP3.BC[2]) / 900);
   const ground = mix(mix(ALB.moraine, ALB.rubble, n), ALB.rubble, nearBC * 0.5);
-  return mix(base, ground, 1 - smoothStep(5680, 5960, y));
+  return mix(base, ground, 1 - snowAmt(y, vnoise(x + 77, z - 13, 1100)));
 }
 
 function smoothStep(a: number, b: number, x: number): number {
@@ -799,7 +861,22 @@ export function farHeightAt(x: number, z: number): number {
   // Ranges grow with distance from the massif. Without this ramp the far
   // terrain reaches full height the instant it leaves the hero grid, and
   // the grid reads as a flat pan sunk inside a ring of peaks.
-  const grow = Math.min(1, dOut / 15000);
+  // Every ramp out here is a function of dOut, and dOut is the distance to a
+  // RECTANGLE — so every contour it draws, the snowline included, comes out
+  // rectangular, and the massif ends up sitting on a visible tan slab the exact
+  // shape of the hero grid. Warping the distance breaks that: the terrain
+  // still rises away from the massif, but along an irregular front, so nothing
+  // traces the grid. The warp vanishes at dOut = 0, so the seam stays matched.
+  const warp = 0.55 + 0.95 * vnoise(x + 4400, z - 2100, 5200)
+    + 0.34 * (vnoise(x - 900, z + 1750, 1900) - 0.5);
+  const dW = dOut * warp;
+  // Hold the ranges down for the first few kilometres. Inside the grid the
+  // terrain is the massif's low outwash plain; if the far ranges start rising
+  // the instant they leave it, the plain's edge IS the grid's edge and the
+  // whole thing reads as a slab the mountain was placed on. Letting the plain
+  // run on — along a warped, irregular front — puts the rise somewhere that
+  // has nothing to do with the rectangle.
+  const grow = Math.min(1, Math.max(0, dW - 2600) / 13000);
   const farAmp = (950 + Math.min(1, dist / 22000) * 1500) * 2.1 * (grow * grow * (3 - 2 * grow));
   const base = 4150 + (vnoise(x + 31, z - 87, 6200) - 0.5) * 650;
   let h = base + (r1 * 0.66 + r2 * 0.34) * rangeMask * farAmp;
@@ -814,7 +891,7 @@ export function farHeightAt(x: number, z: number): number {
   // base. Blended over a kilometre that edge reads as a floating slab, so
   // the transition is a 4 km apron instead: the massif's outwash plain
   // running down into the valley system, which is what is actually there.
-  const t = Math.min(1, dOut / 4000);
+  const t = Math.min(1, dW / 4000);
   // Tucked under the hero mesh so the two never z-fight at the seam. 30 m is
   // invisible across a 4 km apron and clears the coarse mesh's sampling error.
   const edgeH = heightAt(cx, cz) - 30;
@@ -824,16 +901,38 @@ export function farHeightAt(x: number, z: number): number {
 const FAR_ALB = {
   snow: hex('#dfe9f6'), snowHi: hex('#edf3fb'),
   rock: hex('#46506b'),
-  valley: hex('#5d5a52'), valleyB: hex('#6c6a61'),
+  // The SAME ground the hero terrain uses. These were a shade darker and
+  // browner, and since the massif's whole outwash plain is bare ground, that
+  // constant offset painted the hero grid as a lighter rectangle sitting on
+  // the valley floor — the slab the mountain appeared to be placed on. At the
+  // seam the two differed by only ~0.07, which is nothing on a ridge and
+  // unmistakable across ten square kilometres of flat pan.
+  valley: hex('#66655f'), valleyB: hex('#74716b'),
 };
 
-function farAlbedoAt(x: number, z: number, y: number, slopeDeg: number): [number, number, number] {
+export function farAlbedoAt(x: number, z: number, y: number, slopeDeg: number): [number, number, number] {
   const n = vnoise(x + 77, z - 13, 1100);
-  const snowline = 5250 + n * 350;
-  if (y < snowline) return mix(FAR_ALB.valley, FAR_ALB.valleyB, n);
-  if (slopeDeg > 52) return mix(FAR_ALB.rock, FAR_ALB.snow, Math.max(0, n - 0.55));
-  return mix(FAR_ALB.snow, FAR_ALB.snowHi, 0.2 + n * 0.6);
+  const rock = mix(FAR_ALB.rock, FAR_ALB.snow, Math.max(0, n - 0.55));
+  const snow = mix(FAR_ALB.snow, FAR_ALB.snowHi, 0.2 + n * 0.6);
+  let base = mix(snow, rock, smoothStep(46, 62, slopeDeg));
+  // Feathered, and on the SAME snowline the hero terrain uses. A hard cut here
+  // put a crisp tan/white contour across the far range; a snowline 400 m below
+  // the hero's put that contour right where the two meshes meet, so it traced
+  // the grid boundary.
+  base = mix(base, mix(FAR_ALB.valley, FAR_ALB.valleyB, n), 1 - snowAmt(y, n));
+  return base;
 }
+
+/**
+ * How much snow lies at this altitude, 0..1 — shared by the hero terrain and
+ * the far range so the two never disagree about where the snowline is.
+ */
+function snowAmt(y: number, n: number): number {
+  const line = SNOWLINE + (n - 0.5) * 260;
+  return smoothStep(line, line + 420, y);
+}
+
+const SNOWLINE = 5320;
 
 export interface FarRangeData {
   positions: Float32Array;

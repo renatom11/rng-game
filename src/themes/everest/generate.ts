@@ -2,7 +2,7 @@ import { forkRng } from '@/engine/prng';
 import { generateCore } from '@/engine/generate';
 import { buildDisplayTrack, summitBidStartMs } from './rotations';
 import { createTeamMeters, recomputeReadiness, type TeamMeters } from './meters';
-import { assignStyles, buildFate, buildTraversals, buildWeather } from './decorate';
+import { buildFate, buildTraversals, buildWeather } from './decorate';
 import { assignColors, buildSquads } from './names';
 import { buildEvents } from './events';
 import { SEGMENTS } from './route';
@@ -12,8 +12,9 @@ import type { EverestConfig, EverestTimeline } from './types';
  * Everest theme orchestrator.
  *
  * Fairness-critical ordering: generateCore() runs FIRST and reads nothing
- * from team identities — names, colors, and styles only influence the
- * decoration streams below, so they provably cannot shift the outcome.
+ * from team identities — names and colors only influence the decoration
+ * streams below, and route risk is read from the display state, so nothing
+ * here can provably shift the outcome.
  */
 export function generateEverest(
   seedHex: string,
@@ -24,11 +25,6 @@ export function generateEverest(
 
   const core = generateCore(seedHex, { nTeams, durationMs });
 
-  const styles = assignStyles(
-    forkRng(seedHex, 'styles'),
-    nTeams,
-    config.teams.map((t) => t.style),
-  );
   const { colors, colorNames } = assignColors(
     nTeams,
     config.teams.map((t) => t.color),
@@ -73,7 +69,6 @@ export function generateEverest(
     undefined,
     fate.falls,
     weather.storms,
-    styles,
     (team) => {
       const m = createTeamMeters(
         metersRng,
@@ -91,11 +86,21 @@ export function generateEverest(
   const displayTrack = { tMs: choreo.tMs, pos: choreo.pos };
   const meters = teamMeters.map((m) => m.rows);
 
+  // Route risk is read off the mountain, not off a personality. Both inputs
+  // are finished and frozen by now — the display track and the meters share one
+  // grid — so a fork can ask what this squad has left and how far behind it is
+  // AT THAT INSTANT.
+  //
+  // This call must stay exactly here: after the meters are integrated and
+  // BEFORE buildEvents, which nudges those same meters and is itself built from
+  // these traversals. Below buildEvents it would close a real loop
+  // (traversals -> events -> meters -> traversals); above, there is nothing to
+  // read, since the meters do not exist until the track has been walked.
   const traversals = buildTraversals(
     forkRng(seedHex, 'decor'),
     core,
     displayTrack,
-    styles,
+    meters,
   );
 
   const events = buildEvents({
@@ -124,7 +129,6 @@ export function generateEverest(
     version: 1,
     core,
     climbers,
-    styles,
     colors,
     displayTrack,
     meters: { tMs: displayTrack.tMs, values: meters },

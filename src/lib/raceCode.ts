@@ -1,4 +1,3 @@
-import type { Style } from '@/themes/everest/types';
 import type { Theme } from './races';
 
 /**
@@ -22,7 +21,7 @@ export interface RaceCodePayload {
   seed: string;
   theme: Theme;
   title: string;
-  teams: { name: string; color?: string; style?: Style }[];
+  teams: { name: string; color?: string }[];
   durationMs: number;
   startAtMs: number;
   demo: boolean;

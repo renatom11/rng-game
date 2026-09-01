@@ -24,14 +24,12 @@ import {
 import { LineWriter } from '@/lib/linewriter';
 import { forkRng } from '@/engine/prng';
 import { generateCore } from '@/engine/generate';
+import { METER_INDEX } from '@/themes/everest/meters';
 import { HOLD_P } from '@/engine/types';
 
-function cfg(n: number, durationMs: number, style?: 'bold' | 'cautious') {
+function cfg(n: number, durationMs: number) {
   return {
-    teams: Array.from({ length: n }, (_, i) => ({
-      name: `Team ${i + 1}`,
-      style,
-    })),
+    teams: Array.from({ length: n }, (_, i) => ({ name: `Team ${i + 1}` })),
     durationMs,
   };
 }
@@ -54,13 +52,15 @@ describe('everest theme', () => {
     expect(JSON.stringify(a)).toEqual(JSON.stringify(b));
   });
 
-  it('styles provably cannot shift the outcome', () => {
+  it('the outcome is a pure function of seed, team count and duration — no decoration reaches it', () => {
+    // Stronger than the style test this replaces: rather than showing that one
+    // particular input cannot move the result, it pins that the whole narrative
+    // layer cannot, by checking the shipped core against a bare core drawn from
+    // nothing but the three inputs the engine is allowed to see.
     for (let s = 0; s < 40; s++) {
-      const bold = generateEverest(`style-${s}`, cfg(7, 300_000, 'bold'));
-      const caut = generateEverest(`style-${s}`, cfg(7, 300_000, 'cautious'));
-      expect(bold.core.finalOrder).toEqual(caut.core.finalOrder);
-      expect(bold.core.summitTimesMs).toEqual(caut.core.summitTimesMs);
-      expect(JSON.stringify(bold.core)).toEqual(JSON.stringify(caut.core));
+      const t = generateEverest(`core-${s}`, cfg(7, 300_000));
+      const bare = generateCore(`core-${s}`, { nTeams: 7, durationMs: 300_000 });
+      expect(JSON.stringify(t.core)).toEqual(JSON.stringify(bare));
     }
   });
 
@@ -137,6 +137,75 @@ describe('everest theme', () => {
         }
       }
     }
+  });
+
+  it('route risk follows the squad\u2019s state: chasing-and-strong takes the hard lines, protecting-a-lead takes the safe ones', () => {
+    // The fork is not a dial and not a dice roll on a personality. It reads
+    // what the squad has left and how far behind the field it is, at that
+    // instant, off the same grid the meters live on.
+    let riskyChasing = 0, safeChasing = 0, riskyProtecting = 0, safeProtecting = 0;
+    for (const t of runs) {
+      for (const e of t.events) {
+        if (e.type !== 'fork_choice' || !e.edgeId || e.teamIdx === undefined) continue;
+        const i = t.displayTrack.tMs.indexOf(e.tMs);
+        if (i < 0) continue;
+        const col = t.displayTrack.pos.map((r) => r[i]);
+        const mean = col.reduce((a, b) => a + b, 0) / col.length;
+        const behind = mean - col[e.teamIdx];
+        const rows = t.meters.values[e.teamIdx];
+        const cond = 0.6 * rows[METER_INDEX.READY][i] + 0.4 * rows[METER_INDEX.ENERGY][i];
+        const risk = t.edgeRisk[e.edgeId];
+        if (behind > 0.02 && cond >= 50) {
+          if (risk === 'risky') riskyChasing++;
+          else if (risk === 'safe') safeChasing++;
+        } else if (behind < -0.02 && cond <= 30) {
+          if (risk === 'risky') riskyProtecting++;
+          else if (risk === 'safe') safeProtecting++;
+        }
+      }
+    }
+    // Aggregates, not per-event: the shipped readiness is the post-nudge value
+    // and sits a few points off the number the fork actually read.
+    expect(riskyChasing).toBeGreaterThan(safeChasing * 3);
+    expect(safeProtecting).toBeGreaterThan(riskyProtecting);
+  });
+
+  it('the field does not all regroup at Camp IV waiting for one gun', () => {
+    // The last ninth of the race used to be a mandatory parade: every team was
+    // walked to the same parked position on a clock that was a function of
+    // race time alone, and nobody could leave the Col before pushStartMs. Each
+    // squad now reaches and leaves on its own schedule.
+    const C4 = NODES.find((nd) => nd.id === 'C4')!.frac;
+    const spreads: number[] = [];
+    let overlapRaces = 0;
+    for (const t of runs.slice(0, 30)) {
+      const times = t.displayTrack.tMs;
+      const wiped = new Set(t.wipeouts.map((w) => w.teamIdx));
+      const arrive: number[] = [];
+      for (let team = 0; team < N; team++) {
+        if (wiped.has(team)) continue;
+        const pos = t.displayTrack.pos[team];
+        for (let i = 0; i < times.length; i++) {
+          if (pos[i] >= C4 - 0.01) { arrive.push(times[i]); break; }
+        }
+      }
+      if (arrive.length > 1) spreads.push((Math.max(...arrive) - Math.min(...arrive)) / DUR);
+      for (let i = 0; i < times.length; i++) {
+        const live = t.displayTrack.pos
+          .map((r, k) => (wiped.has(k) ? null : r[i]))
+          .filter((v): v is number => v !== null);
+        if (live.some((v) => v > C4 + 0.03) && live.some((v) => v < C4 - 0.02)) {
+          overlapRaces++;
+          break;
+        }
+      }
+    }
+    const med = [...spreads].sort((a, b) => a - b)[Math.floor(spreads.length / 2)];
+    // Camp IV arrivals spread across a real slice of the race...
+    expect(med).toBeGreaterThan(0.02);
+    // ...and often enough, someone is on the summit ridge while someone else
+    // has not yet reached Camp IV at all.
+    expect(overlapRaces).toBeGreaterThan(spreads.length * 0.25);
   });
 
   it('a camp once reached is a floor for the rest of the climb', () => {
@@ -629,9 +698,8 @@ describe('storm holds and rotation narration', () => {
       { startMs: D * 0.3, endMs: D * 0.36 },
       { startMs: D * 0.62, endMs: D * 0.68 },
     ];
-    const styles = Array.from({ length: 8 }, () => 'cautious' as const);
     const { tMs, pos, beats } = buildDisplayTrack(
-      forkRng('hold-seed-1', 'rotations'), core, D, undefined, [], storms, styles,
+      forkRng('hold-seed-1', 'rotations'), core, D, undefined, [], storms,
     );
     const holds = beats.filter((b) => b.kind === 'hold');
     expect(holds.length).toBeGreaterThan(0);
@@ -661,9 +729,8 @@ describe('storm holds and rotation narration', () => {
     const D = 3_600_000;
     const core = generateCore('hold-seed-2', { nTeams: 6, durationMs: D });
     const storms = [{ startMs: D * 0.74, endMs: D * 0.84 }];
-    const styles = Array.from({ length: 6 }, () => 'cautious' as const);
     const { tMs, pos, beats } = buildDisplayTrack(
-      forkRng('hold-seed-2', 'rotations'), core, D, undefined, [], storms, styles,
+      forkRng('hold-seed-2', 'rotations'), core, D, undefined, [], storms,
     );
     const holds = beats.filter((b) => b.kind === 'hold');
     expect(holds.length).toBeGreaterThan(0);

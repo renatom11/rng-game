@@ -62,7 +62,6 @@ export interface JourneySnapshot {
   sinceMs: number;
   complete: boolean;
   climbers: EverestTimeline['climbers'];
-  styles: EverestTimeline['styles'];
   colors: EverestTimeline['colors'];
   edgeRisk: EverestTimeline['edgeRisk'];
   pushStartMs: number;
@@ -125,7 +124,6 @@ export function toJourneySnapshot<T extends 'everest'>(
       sinceMs: -1,
       complete: true,
       climbers: timeline.climbers,
-      styles: timeline.styles,
       colors: timeline.colors,
       edgeRisk: timeline.edgeRisk,
       pushStartMs: core.pushStartMs,
@@ -175,7 +173,6 @@ export function toJourneyWindow<T extends 'everest' | 'space'>(
     sinceMs,
     complete: false,
     climbers: delta ? [] : timeline.climbers,
-    styles: delta ? [] : timeline.styles,
     colors: delta ? [] : timeline.colors,
     edgeRisk: delta ? {} : timeline.edgeRisk,
     pushStartMs: core.pushStartMs,

@@ -20,15 +20,15 @@ import type { JourneySnapshot } from '@/lib/slice';
 import { displayPosAt, edgeChoicesAt, teamStatesAt, teamTags } from '@/lib/client/raceState';
 import { sceneLight } from '@/themes/everest/scene';
 import {
-  buildBranches,
+  branches3D,
   buildContours,
   buildFarRange,
   buildTerrain,
   CAM_PRESETS,
   CAM_SUMMIT_WIDE,
   heightAt,
-  posToXYZ,
-  ROUTE3,
+  posToXYZOn,
+  segIndexAt,
   sunDir,
   WP3,
 } from '@/themes/everest/terrain3d';
@@ -55,8 +55,6 @@ const LABELS: { id: string; name: string; alt: string; tier: 0 | 1 }[] = [
   { id: 'SUMMIT', name: 'Summit', alt: '8,849 m', tier: 0 },
 ];
 
-/** Start frac of each route segment, for "which leg is this team on". */
-const ROUTE_SEG_FRACS = [0, 0.16, 0.32, 0.52, 0.7, 0.82, 0.92, 0.96];
 
 /** A team is a light, not a badge: bright core, color ring, soft falloff. */
 function lightTexture(color: string): THREE.CanvasTexture {
@@ -119,6 +117,26 @@ function moonTexture(): THREE.CanvasTexture {
   return new THREE.CanvasTexture(c);
 }
 
+/** A death site: a hard X with a dark rim, so it reads on snow and on rock. */
+function crossTexture(color: string): THREE.CanvasTexture {
+  const c = document.createElement('canvas');
+  c.width = c.height = 64;
+  const g = c.getContext('2d')!;
+  g.lineCap = 'round';
+  const arm = 17;
+  const draw = (w: number, style: string) => {
+    g.lineWidth = w;
+    g.strokeStyle = style;
+    g.beginPath();
+    g.moveTo(32 - arm, 32 - arm); g.lineTo(32 + arm, 32 + arm);
+    g.moveTo(32 + arm, 32 - arm); g.lineTo(32 - arm, 32 + arm);
+    g.stroke();
+  };
+  draw(13, 'rgba(6, 10, 20, 0.92)'); // rim first: the mark keeps its edge on snow
+  draw(6, color);
+  return new THREE.CanvasTexture(c);
+}
+
 function beamTexture(color: string): THREE.CanvasTexture {
   const c = document.createElement('canvas');
   c.width = 32;
@@ -164,13 +182,44 @@ export function MountainMap3D(props: Props) {
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.target.set(...CAM_PRESETS[0].target);
     controls.enableDamping = true;
-    controls.dampingFactor = 0.08;
-    controls.minDistance = 650;
-    controls.maxDistance = 16000;
-    controls.maxPolarAngle = 1.48;
-    controls.enablePan = false;
+    controls.dampingFactor = 0.075;
+    controls.minDistance = 900;
+    controls.maxDistance = 26000;
+    // Keep the viewer on the mountain's own hemisphere: straight down turns
+    // the massif into a flat map, and below the horizon puts them inside it.
+    controls.minPolarAngle = 0.42;
+    controls.maxPolarAngle = 1.46;
+    // Panning is how you look at a camp that is not the orbit centre. Without
+    // it the only way to see anything off-centre is to orbit the whole world.
+    controls.enablePan = true;
+    controls.screenSpacePanning = false;
+    controls.panSpeed = 0.7;
+    controls.rotateSpeed = 0.62;
+    // One notch is 5% of the standoff at three's default zoomSpeed of 1, so
+    // crossing the full range took about sixty of them. The dolly is already
+    // multiplicative, so a bigger number stays proportional — it just stops
+    // the wheel feeling disconnected from the mountain.
+    controls.zoomSpeed = 2.1;
+    // Zoom toward whatever is under the pointer. Without this the dolly runs
+    // along the camera-to-target axis, and in ambient mode that target is a
+    // moving blend of the team centroid and the summit — so pointing at a
+    // camp and scrolling walked you somewhere else entirely.
+    controls.zoomToCursor = true;
     controls.autoRotate = !reduced;
     controls.autoRotateSpeed = 0.32;
+
+    // Panning can walk the orbit centre off the mountain entirely, and there
+    // is no way back. Keep it inside the massif's own box.
+    const PAN_BOUNDS = {
+      x: [-5200, 2400] as const,
+      y: [4900, 9200] as const,
+      z: [-1600, 3800] as const,
+    };
+    const clampTarget = () => {
+      controls.target.x = Math.min(Math.max(controls.target.x, PAN_BOUNDS.x[0]), PAN_BOUNDS.x[1]);
+      controls.target.y = Math.min(Math.max(controls.target.y, PAN_BOUNDS.y[0]), PAN_BOUNDS.y[1]);
+      controls.target.z = Math.min(Math.max(controls.target.z, PAN_BOUNDS.z[0]), PAN_BOUNDS.z[1]);
+    };
 
     // --- sky dome -------------------------------------------------------
     // The sky is a shader, not a gradient: three star layers and the Milky
@@ -324,11 +373,18 @@ export function MountainMap3D(props: Props) {
     // and a faint daylight glint — micro-relief the geometry can't afford,
     // faked in the normal before lighting runs.
     const hazeColor = new THREE.Color('#8ea6c8');
+    // ONE atmosphere. The hero terrain and the far range are two meshes with
+    // two materials, and they used to haze at 1/30000 and 1/15500 — the far
+    // range washing out twice as fast at the same distance. That is a step
+    // change in colour along the exact line where the two meshes meet, which
+    // is the hero grid's rectangle: the massif sat on a warm slab while
+    // everything beyond it turned blue. Shared here so they cannot drift.
+    const hazeK = { value: 1 / 26000 };
     const terrainUniforms = {
       uDay: { value: 1 },
       uSky: { value: new THREE.Color('#27436b') },
       uHaze: { value: hazeColor },
-      uHazeK: { value: 1 / 30000 },
+      uHazeK: hazeK,
       uGlow: { value: new THREE.Color('#ff8a5e') },
       uBand: { value: 0 },
     };
@@ -431,7 +487,7 @@ float tnoise(vec2 p){
     farGeo.computeVertexNormals();
     const farUniforms = {
       uHaze: { value: hazeColor },
-      uHazeK: { value: 1 / 15500 },
+      uHazeK: hazeK,
     };
     const farMat = new THREE.MeshLambertMaterial({ vertexColors: true });
     farMat.onBeforeCompile = (shader) => {
@@ -443,7 +499,7 @@ float tnoise(vec2 p){
 #ifdef USE_FOG
 {
   float fh = 1.0 - exp(-pow(vFogDepth * uHazeK, 1.35));
-  gl_FragColor.rgb = mix(gl_FragColor.rgb, uHaze, min(0.86, fh));
+  gl_FragColor.rgb = mix(gl_FragColor.rgb, uHaze, min(0.9, fh));
 }
 #endif`);
     };
@@ -465,10 +521,17 @@ float tnoise(vec2 p){
         depthWrite: false,
         side: THREE.DoubleSide,
         uniforms,
-        vertexShader:
-          'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
+        vertexShader: `
+          varying vec2 vUv;
+          varying vec3 vWPos;
+          void main(){
+            vUv = uv;
+            vWPos = (modelMatrix * vec4(position, 1.0)).xyz;
+            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+          }`,
         fragmentShader: `
           varying vec2 vUv;
+          varying vec3 vWPos;
           uniform float uTime; uniform float uCov; uniform vec3 uCol; uniform float uOp; uniform float uSeed;
           float h21(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
           float n2(vec2 p){
@@ -486,8 +549,18 @@ float tnoise(vec2 p){
             p.x += uTime * 0.011;
             float n = fbm(p + fbm(p * 0.5 + uTime * 0.004) * 1.3);
             float a = smoothstep(1.0 - uCov, 1.0 - uCov + 0.34, n);
-            vec2 e = abs(vUv - 0.5) * 2.0;
-            a *= 1.0 - smoothstep(0.7, 1.0, max(e.x, e.y));
+            // Round the deck off well inside its own geometry, on radius
+            // rather than on a square mask — a max(|x|,|y|) falloff still
+            // leaves four straight edges once the deck is dense.
+            float r = length((vUv - 0.5) * 2.0);
+            a *= 1.0 - smoothstep(0.55, 0.98, r);
+            // A deck is a flat plane. Seen from near its own altitude it is
+            // edge-on, and an edge-on plane draws a knife-sharp horizontal
+            // band across the screen — which is what read as "you can see the
+            // boundaries of the particle effects". Fade it out as the view
+            // ray flattens, so it only ever shows when looked down or up at.
+            vec3 V = normalize(vWPos - cameraPosition);
+            a *= smoothstep(0.035, 0.21, abs(V.y));
             float shade = 0.7 + 0.3 * smoothstep(0.2, 0.9, n);
             gl_FragColor = vec4(uCol * shade, a * uOp);
           }`,
@@ -526,17 +599,26 @@ float tnoise(vec2 p){
     // Every leg offers a safe, a normal and a risky line. They are drawn as
     // three distinct paths on the mountain so the choice each team makes is
     // visible in the world, not just in the feed.
-    const routePts = ROUTE3.map((p) => new THREE.Vector3(p.x, p.y + 14, p.z));
-    const fixedLine = new THREE.Line(
-      new THREE.BufferGeometry().setFromPoints(routePts),
-      new THREE.LineBasicMaterial({ color: '#8a7a52', transparent: true, opacity: 0.3, depthWrite: false }),
-    );
-    scene.add(fixedLine);
-
-    const RISK_COLOR: Record<string, string> = {
-      safe: '#5fd0a8',
-      medium: '#e8b957',
-      risky: '#ef6a5c',
+    // Grades read as dark ink on sunlit snow. The old mint/amber/salmon were
+    // brighter than the mountain they were drawn on, so three of them over a
+    // white face composited to pastel mush; after dark they lift toward lamp
+    // colour so they don't sink into the massif. (The canonical spine that used
+    // to be drawn alongside them is gone — it was a fifth line per leg
+    // belonging to no grade and no team.)
+    const RISK_DAY: Record<string, string> = {
+      safe: '#2f8f6b',
+      medium: '#b3801f',
+      risky: '#c2453a',
+    };
+    const RISK_NIGHT: Record<string, string> = {
+      safe: '#7fe0bb',
+      medium: '#f2cc72',
+      risky: '#ff8f81',
+    };
+    const RISK_RGB: Record<string, { day: THREE.Color; night: THREE.Color }> = {
+      safe: { day: new THREE.Color(RISK_DAY.safe), night: new THREE.Color(RISK_NIGHT.safe) },
+      medium: { day: new THREE.Color(RISK_DAY.medium), night: new THREE.Color(RISK_NIGHT.medium) },
+      risky: { day: new THREE.Color(RISK_DAY.risky), night: new THREE.Color(RISK_NIGHT.risky) },
     };
     // Ribbons, not lines: GL clamps line width to one pixel on nearly every
     // driver, so a hairline vanishes at altitude. A flat strip laid on the
@@ -566,31 +648,36 @@ float tnoise(vec2 p){
       g.computeVertexNormals();
       return g;
     };
-    const branchLines = buildBranches().map((br) => {
+    const branchLines = branches3D().map((br) => {
       const mat = new THREE.MeshBasicMaterial({
-        color: RISK_COLOR[br.risk],
+        color: RISK_DAY[br.risk],
         transparent: true,
-        opacity: 0.5,
+        opacity: 0.24,
         depthWrite: false,
         side: THREE.DoubleSide,
       });
-      const ribbon = new THREE.Mesh(ribbonGeo(br.points, 17), mat);
+      // 18 m wide, not 34: a marked climbing line, not a painted road. Every
+      // lane tapers to the same point at each camp, so three wide strips
+      // stacked into a colour blob at BC, C1, C2, C3, C4 and the Balcony.
+      const ribbon = new THREE.Mesh(ribbonGeo(br.points, 9), mat);
       ribbon.renderOrder = 6;
       scene.add(ribbon);
-      // A wider, softer twin so an active line reads as lit rope after dark.
+      // The soft twin belongs to the live line AFTER DARK only: additive light
+      // over sunlit snow has nowhere to go but white, which is the smear.
       const glowMat = new THREE.MeshBasicMaterial({
-        color: RISK_COLOR[br.risk],
+        color: RISK_NIGHT[br.risk],
         transparent: true,
         opacity: 0,
         depthWrite: false,
         blending: THREE.AdditiveBlending,
         side: THREE.DoubleSide,
       });
-      const glow = new THREE.Mesh(ribbonGeo(br.points, 40), glowMat);
+      const glow = new THREE.Mesh(ribbonGeo(br.points, 24), glowMat);
       glow.renderOrder = 7;
       glow.position.y = 6;
+      glow.visible = false;
       scene.add(glow);
-      return { br, mat, glowMat };
+      return { br, mat, glowMat, glow };
     });
 
     // --- camps ----------------------------------------------------------
@@ -752,10 +839,72 @@ float tnoise(vec2 p){
       return el;
     });
 
+    // --- death sites ------------------------------------------------------
+    // Where the mountain took someone. Until now there was no mark at all in
+    // 3D — a lost team was simply hidden — which is why deaths could not be
+    // seen. Each site is placed on the line that team was actually on at the
+    // time and kept for the rest of the race: the record of the climb is part
+    // of the climb. Read-only over already-delivered events.
+    interface DeathSite {
+      x: number; y: number; z: number; color: string; tMs: number; big: boolean;
+    }
+    let deathSites: DeathSite[] = [];
+    const deathGroup = new THREE.Group();
+    scene.add(deathGroup);
+    const deathSprites: THREE.Sprite[] = [];
+    const crossTexCache = new Map<string, THREE.CanvasTexture>();
+    const crossTexFor = (color: string) => {
+      let t = crossTexCache.get(color);
+      if (!t) { t = crossTexture(color); crossTexCache.set(color, t); }
+      return t;
+    };
+    /**
+     * One pass over the delivered events: track each team's live fork choice
+     * and stamp a site wherever a climber or a whole expedition was lost.
+     */
+    const rebuildDeaths = (
+      snap: JourneySnapshot,
+      nTeams: number,
+      tMs: number,
+    ): DeathSite[] => {
+      const choice: (string | null)[][] = Array.from({ length: nTeams }, () =>
+        new Array<string | null>(nSegs).fill(null),
+      );
+      const sites: DeathSite[] = [];
+      for (const e of snap.events) {
+        if (e.tMs > tMs) break;
+        if (e.teamIdx === undefined) continue;
+        if (e.type === 'fork_choice' && e.edgeId) {
+          const seg = segByEdge.get(e.edgeId);
+          if (seg !== undefined) choice[e.teamIdx][seg] = e.edgeId;
+          continue;
+        }
+        if (e.type !== 'climber_fall' && e.type !== 'team_wipeout') continue;
+        const dp = displayPosAt(snap, e.teamIdx, e.tMs);
+        const [dx, dy, dz] = posToXYZOn(dp, choice[e.teamIdx][segIndexAt(dp)]);
+        const k = sites.length;
+        // Fan co-located marks apart: a wipeout loses a whole rope at one point.
+        sites.push({
+          x: dx + ((k % 3) - 1) * 26,
+          y: dy + 16,
+          z: dz + (k % 2) * 22 - 11,
+          color: snap.colors[e.teamIdx],
+          tMs: e.tMs,
+          big: e.type === 'team_wipeout',
+        });
+      }
+      return sites;
+    };
+
     // --- interaction ----------------------------------------------------
     let lastInteract = -1e9;
     const onStart = () => {
       lastInteract = performance.now();
+      // A running tween overwrites camera.position every frame, so until it
+      // finished the wheel did nothing at all — up to three seconds of dead
+      // input after a preset button or the finale pull-back. Taking hold of
+      // the camera cancels the move it was making.
+      tween = null;
       if (modeRef.current !== 'manual') setMode('manual');
     };
     controls.addEventListener('start', onStart);
@@ -817,22 +966,32 @@ float tnoise(vec2 p){
     let states: ReturnType<typeof teamStatesAt> = [];
     let stormNow = 0;
     let finaleStage = -1;
-    const segByEdge = new Map(branchLines.map(({ br }) => [br.id, br.segIdx]));
+    const segByEdge = new Map<string, number>(
+      branchLines.map(({ br }) => [br.id, br.segIdx] as [string, number]),
+    );
     let liveEdges = new Set<string>();
+    const nSegs = Math.max(...segByEdge.values()) + 1;
+    // Which line each team is standing on, so the light can ride the ribbon it
+    // chose instead of the canonical route nobody is drawn on.
+    let edgeChoices: (string | null)[][] = [];
 
     const stormAt = (tMs: number) => {
       let best = 0;
       for (const st of propsRef.current.snap.storms ?? []) {
         const len = st.endMs - st.startMs;
         const edge = Math.max(2000, Math.min(60_000, len * 0.2));
-        best = Math.max(
-          best,
-          Math.min(
-            1,
-            Math.max(0, (tMs - (st.startMs - edge)) / edge),
-            Math.max(0, (st.endMs + edge - tMs) / edge),
-          ),
+        // Ramp in, ramp out — and an arc in between. This used to be pinned at
+        // exactly 1.0 across the whole storm body, which is 4-24% of a race, so
+        // every coefficient downstream was authored for a crest that was in
+        // fact a long plateau. Real weather has a worst hour.
+        const ramp = Math.min(
+          1,
+          Math.max(0, (tMs - (st.startMs - edge)) / edge),
+          Math.max(0, (st.endMs + edge - tMs) / edge),
         );
+        const through = Math.max(0, Math.min(1, (tMs - st.startMs) / Math.max(1, len)));
+        const arc = 0.72 + 0.28 * Math.sin(Math.PI * through);
+        best = Math.max(best, ramp * arc);
       }
       return best;
     };
@@ -852,17 +1011,17 @@ float tnoise(vec2 p){
         lastTick = tick;
         states = teamStatesAt(p.snap, p.teamNames.length, p.tMs);
         stormNow = stormAt(p.tMs);
-        // Which lines are carrying climbers right now.
-        const choices = edgeChoicesAt(p.snap, p.teamNames.length, p.tMs, segByEdge);
+        // Which lines are carrying climbers right now — kept, not discarded,
+        // because the team loop needs the same answer to place each marker.
+        edgeChoices = edgeChoicesAt(p.snap, p.teamNames.length, p.tMs, segByEdge);
         const live = new Set<string>();
-        for (let i = 0; i < choices.length; i++) {
+        for (let i = 0; i < edgeChoices.length; i++) {
           if (states[i]?.wiped) continue;
-          const pos = displayPosAt(p.snap, i, p.tMs);
-          const segNow = ROUTE_SEG_FRACS.findIndex((f, k) => pos >= f && pos < (ROUTE_SEG_FRACS[k + 1] ?? 2));
-          const id = choices[i][segNow < 0 ? 0 : segNow];
+          const id = edgeChoices[i][segIndexAt(displayPosAt(p.snap, i, p.tMs))];
           if (id) live.add(id);
         }
         liveEdges = live;
+        deathSites = rebuildDeaths(p.snap, p.teamNames.length, p.tMs);
       }
 
       // Light of the hour.
@@ -919,12 +1078,15 @@ float tnoise(vec2 p){
       terrainUniforms.uBand.value = skyUniforms.uBand.value;
       moon.intensity = Math.max(moon.intensity, L.darkness * 0.62);
       (scene.fog as THREE.FogExp2).color.set(L.horizon);
+      // Storm fog was 0.00021 — sixteen times the clear-sky base, which drowned
+      // the whole massif in flat grey long before the snow or the decks got a
+      // say. A storm should obscure the mountain, not delete it.
       (scene.fog as THREE.FogExp2).density =
-        0.000013 + L.haze * 0.000012 + stormNow * 0.00021;
+        0.000013 + L.haze * 0.000012 + stormNow * 0.00008;
       // Cloud sea: dense at dawn, burning off toward midday, back at dusk.
       {
         const daily = 0.5 + 0.5 * Math.cos((u - 0.03) * Math.PI * 2.3);
-        const cov = Math.min(0.8, 0.3 + 0.3 * daily + stormNow * 0.24);
+        const cov = Math.min(0.8, 0.3 + 0.3 * daily + stormNow * 0.14);
         const cloudLum = 0.16 + dayness * 0.84;
         for (let ci = 0; ci < cloudDecks.length; ci++) {
           const cd = cloudDecks[ci];
@@ -933,13 +1095,13 @@ float tnoise(vec2 p){
           cd.uCol.value
             .setRGB(0.86 * cloudLum, 0.9 * cloudLum, 0.97 * cloudLum)
             .lerp(tmpColor.set(L.glow), skyUniforms.uBand.value * 0.35);
-          cd.uOp.value = 0.66 + stormNow * 0.2;
+          cd.uOp.value = 0.66 + stormNow * 0.1;
         }
         // The scud ceiling belongs to the storm alone.
         scudDeck.uTime.value = now * 0.0014 + 200;
-        scudDeck.uCov.value = stormNow * 0.62;
+        scudDeck.uCov.value = stormNow * 0.44;
         scudDeck.uCol.value.setRGB(0.5 * cloudLum + 0.06, 0.53 * cloudLum + 0.065, 0.6 * cloudLum + 0.075);
-        scudDeck.uOp.value = stormNow * 0.85;
+        scudDeck.uOp.value = stormNow * 0.42;
       }
       sunSprite.position.set(sd[0] * 40000, Math.max(800, sd[1] * 40000), sd[2] * 40000);
       // The bloom shrinks and dims as the sun sinks — no red wall at dusk.
@@ -959,24 +1121,37 @@ float tnoise(vec2 p){
 
       // Whiteout: at the top of a storm you cannot see the field. The rail
       // still knows; the mountain does not.
-      const white = Math.max(0, (stormNow - 0.8) / 0.2);
+      // A whiteout should thin the field, not erase it: at full blast the
+      // route grades stayed drawn but faint, instead of vanishing outright.
+      const white = Math.max(0, (stormNow - 0.85) / 0.15) * 0.62;
       const lampAmt = Math.max(0, Math.min(1, (L.darkness - 0.45) * 1.8));
 
       // Route choices: all three grades stay legible, and the lines
       // carrying climbers right now glow.
       {
         const vis = 1 - white;
-        for (const { br, mat, glowMat } of branchLines) {
+        for (const { br, mat, glowMat, glow } of branchLines) {
           const on = liveEdges.has(br.id);
-          mat.opacity = vis * (on ? 0.95 : 0.4 + L.darkness * 0.14);
-          glowMat.opacity = on ? vis * (0.28 + L.darkness * 0.3) : 0;
+          const rgb = RISK_RGB[br.risk];
+          mat.color.copy(rgb.day).lerp(rgb.night, L.darkness);
+          // A 3x separation, not 0.5 against 0.95: idle grades are a hint, the
+          // line under someone's boots is the one that reads.
+          mat.opacity = vis * (on ? 0.7 : 0.22 + L.darkness * 0.12);
+          const g = on ? vis * L.darkness * 0.34 : 0;
+          glowMat.opacity = g;
+          glow.visible = g > 0.01;
         }
       }
       // Spindrift is the mountain's resting pulse; storms turn it feral.
-      snowMat.opacity = 0.16 + stormNow * 0.72;
-      snow.visible = true;
+      snowMat.opacity = 0.1 + stormNow * 0.32;
+      snow.visible = snowMat.opacity > 0.01;
       {
+        // The flurry is a fixed 4.2 km box pinned to the orbit target. Zoomed
+        // out that box is small against the view and its empty surround reads
+        // as a boundary, so scale it with how far the camera is standing off.
         snow.position.copy(controls.target);
+        const standoff = camera.position.distanceTo(controls.target);
+        snow.scale.setScalar(Math.max(1, standoff / 2600));
         const arr = snowGeo.getAttribute('position') as THREE.BufferAttribute;
         const fall = 4 + stormNow * 26;
         const drift = 2.5 + stormNow * 28;
@@ -1034,7 +1209,8 @@ float tnoise(vec2 p){
       }
       for (let i = 0; i < teamGroups.length; i++) {
         const pos = displayPosAt(p.snap, i, p.tMs);
-        let [x, y, z] = posToXYZ(pos);
+        const edgeNow = edgeChoices[i]?.[segIndexAt(pos)] ?? null;
+        let [x, y, z] = posToXYZOn(pos, edgeNow);
         // A team that has topped out leaves the mountain: its light, beam
         // and tag are removed rather than parked on the summit, where a
         // growing pile of dots buried the peak it just earned. The summit
@@ -1048,11 +1224,23 @@ float tnoise(vec2 p){
           tagEls[i].style.opacity = '0';
           continue;
         }
-        grp.position.set(x, y + 26, z);
+        // Branch points already sit 22 m proud of the snow, so the light needs
+        // only enough lift to clear its own ribbon.
+        grp.position.set(x, y + 14, z);
         grp.userData.parked = parked;
         const st = states[i];
-        const wiped = st?.wiped ?? false;
-        const visMul = (1 - white) * (wiped ? 0.35 : 1);
+        if (st?.wiped) {
+          // A lost expedition is its mark, not a dimmed light. Half-lighting a
+          // dot that still reads as a climbing team is what made deaths
+          // invisible; the cross below carries the team colour and stays.
+          grp.visible = false;
+          grp.userData.parked = true;
+          (trailLines[i].material as THREE.LineBasicMaterial).opacity = 0;
+          tagEls[i].style.opacity = '0';
+          continue;
+        }
+        const wiped = false;
+        const visMul = 1 - white;
         dotSprites[i].scale.set(dotScale, dotScale, 1);
         dotSprites[i].material.opacity = 0.25 + visMul * 0.75;
         // Brightness is condition; warmth is a headlamp after dark.
@@ -1077,8 +1265,8 @@ float tnoise(vec2 p){
             for (let k = 16; k >= 0; k--) {
               const tp = displayPosAt(p.snap, i, Math.max(0, p.tMs - k * step));
               if (Math.abs(pos - tp) > 0.04) continue;
-              const [tx, ty, tz] = posToXYZ(tp);
-              pts.push(new THREE.Vector3(tx, ty + 22, tz));
+              const [tx, ty, tz] = posToXYZOn(tp, edgeChoices[i]?.[segIndexAt(tp)] ?? null);
+              pts.push(new THREE.Vector3(tx, ty + 10, tz));
             }
           }
           if (pts.length >= 2) {
@@ -1107,6 +1295,37 @@ float tnoise(vec2 p){
             g.position.addScaledVector(right, side * mag);
           }
         }
+      }
+
+      // Death sites: constant screen size so they read at any zoom, a short
+      // flare as they happen, then a permanent quiet mark.
+      for (let k = 0; k < deathSites.length; k++) {
+        const d = deathSites[k];
+        let sp = deathSprites[k];
+        if (!sp) {
+          sp = new THREE.Sprite(
+            new THREE.SpriteMaterial({
+              transparent: true, depthWrite: false, depthTest: false,
+              sizeAttenuation: false,
+            }),
+          );
+          sp.renderOrder = 26; // under the living lights, over the world
+          deathSprites[k] = sp;
+          deathGroup.add(sp);
+        }
+        const m = sp.material as THREE.SpriteMaterial;
+        const tex = crossTexFor(d.color);
+        if (m.map !== tex) { m.map = tex; m.needsUpdate = true; }
+        sp.visible = true;
+        sp.position.set(d.x, d.y, d.z);
+        const fresh = Math.max(0, 1 - (p.tMs - d.tMs) / 6000);
+        const base = (d.big ? 30 : 22) + fresh * 16;
+        const s = Math.min(0.1, (2 * base) / px);
+        sp.scale.set(s, s, 1);
+        m.opacity = (0.62 + fresh * 0.38) * (1 - white * 0.7);
+      }
+      for (let k = deathSites.length; k < deathSprites.length; k++) {
+        deathSprites[k].visible = false;
       }
 
       // Selection ring.
@@ -1174,10 +1393,12 @@ float tnoise(vec2 p){
           camera.position.copy(controls.target).addScaledVector(dir, nd);
         }
       }
-      if (modeRef.current === 'manual' && now - lastInteract > 16000) {
-        setMode('ambient');
-      }
+      // Once someone has taken the camera, they keep it. The drift used to
+      // resume by itself after 16 seconds, which meant lining up a view and
+      // then watching it slide away — and there is already an explicit
+      // "Follow the action" button for handing the camera back.
       controls.autoRotate = !reduced && modeRef.current === 'ambient' && !tween;
+      clampTarget();
       controls.update();
 
       // Preset requests from the snap row.
@@ -1274,9 +1495,9 @@ float tnoise(vec2 p){
     <div className="m3d-wrap" ref={wrapRef}>
       <div className="m3d-labels" ref={labelsRef} aria-hidden />
       <div className="m3d-legend" aria-hidden>
-        <span><i style={{ background: '#5fd0a8' }} />safe</span>
-        <span><i style={{ background: '#e8b957' }} />normal</span>
-        <span><i style={{ background: '#ef6a5c' }} />risky</span>
+        <span><i style={{ background: '#2f8f6b' }} />safe</span>
+        <span><i style={{ background: '#b3801f' }} />normal</span>
+        <span><i style={{ background: '#c2453a' }} />risky</span>
       </div>
       <div className="m3d-snap" role="group" aria-label="Camera views">
         {CAM_PRESETS.map((c) => (

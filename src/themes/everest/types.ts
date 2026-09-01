@@ -1,7 +1,6 @@
 import type { CoreTimeline } from '@/engine/types';
 import type { Risk } from './route';
 
-export type Style = 'bold' | 'balanced' | 'cautious';
 
 export type ClimberStatus =
   | 'climbing'
@@ -118,7 +117,6 @@ export type MeterKey = (typeof METER_KEYS)[number];
 export interface EverestTeamInput {
   name: string;
   color?: string;
-  style?: Style;
 }
 
 export interface EverestConfig {
@@ -131,7 +129,6 @@ export interface EverestTimeline {
   core: CoreTimeline;
   /** Per team: squad roster (index 0 is the expedition leader). */
   climbers: Climber[][];
-  styles: Style[];
   colors: string[];
   /**
    * Route-display keyframes on a shared sparse grid: pos[team][i] ∈ [0,1]

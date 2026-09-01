@@ -1,6 +1,5 @@
 import type { RaceStatus } from './time';
 import type { PublicSnapshot } from './slice';
-import type { Style } from '@/themes/everest/types';
 
 /**
  * Race config types + validation, shared by the thin server (raceApi.ts)
@@ -15,7 +14,7 @@ export type Theme = 'everest';
 export interface CreateRaceInput {
   title?: string;
   theme?: Theme;
-  teams: { name: string; color?: string; style?: Style }[];
+  teams: { name: string; color?: string }[];
   durationMs: number;
   startAtMs?: number;
   demo?: boolean;
@@ -24,7 +23,7 @@ export interface CreateRaceInput {
 export interface RaceConfigStored {
   title: string;
   theme: Theme;
-  teams: { name: string; color?: string; style?: Style }[];
+  teams: { name: string; color?: string }[];
   demo: boolean;
 }
 
@@ -48,10 +47,6 @@ export function validateCreateInput(
     if (t.color !== undefined) {
       if (!/^#[0-9a-fA-F]{6}$/.test(t.color)) throw new ValidationError('colors must be #rrggbb');
       out.color = t.color;
-    }
-    if (t.style !== undefined) {
-      if (!['bold', 'balanced', 'cautious'].includes(t.style)) throw new ValidationError('style must be bold, balanced, or cautious');
-      out.style = t.style;
     }
     return out;
   });
@@ -98,6 +93,6 @@ export interface RaceView {
   serverNow: number;
   startAt: number;
   durationMs: number;
-  config: { title: string; theme: string; demo: boolean; teams: { name: string; color?: string; style?: Style }[] };
+  config: { title: string; theme: string; demo: boolean; teams: { name: string; color?: string }[] };
   snapshot: PublicSnapshot;
 }
