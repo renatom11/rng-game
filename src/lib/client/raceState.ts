@@ -354,15 +354,26 @@ export function edgeChoicesAt(
   return out;
 }
 
-/** Short display tags for team markers, made unique. */
+const TAG_STOPWORDS = new Set(['the', 'a', 'an', 'of', 'and', 'de', 'la', 'le', 'los', 'el']);
+
+/**
+ * Short display tags for team markers, made unique. Built from the name's
+ * distinctive words — "The Yak Attack" earns YAK, not the article THE.
+ */
 export function teamTags(names: string[]): string[] {
   const tags: string[] = [];
   const used = new Set<string>();
   for (const name of names) {
-    const base = name.replace(/[^\p{L}\p{N}]/gu, '').slice(0, 3).toUpperCase() || 'TM';
-    let tag = base;
+    const words = name
+      .split(/[^\p{L}\p{N}]+/u)
+      .filter((w) => w.length > 0 && !TAG_STOPWORDS.has(w.toLowerCase()));
+    const candidates = words.map((w) => w.slice(0, 3).toUpperCase());
+    if (candidates.length === 0) {
+      candidates.push(name.replace(/[^\p{L}\p{N}]/gu, '').slice(0, 3).toUpperCase() || 'TM');
+    }
+    let tag = candidates.find((c) => !used.has(c)) ?? candidates[0];
     let i = 2;
-    while (used.has(tag)) tag = base.slice(0, 2) + String(i++);
+    while (used.has(tag)) tag = candidates[0].slice(0, 2) + String(i++);
     used.add(tag);
     tags.push(tag);
   }

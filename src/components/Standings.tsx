@@ -17,6 +17,7 @@ import type { ClimberStatus } from '@/themes/everest/types';
 import type { JourneyTheme } from '@/lib/client/journeyTheme';
 import ClimberPortrait from './ClimberPortrait';
 import { fmtClock } from './useRaceClock';
+import { useFlipList } from './useFlip';
 
 const STATUS_CHIP: Record<ClimberStatus, string> = {
   climbing: 'ok',
@@ -64,6 +65,9 @@ export function Standings({ snap, jt, teamNames, tMs, durationMs, selected, onSe
     [snap, n, tick, durationMs],
   );
   const tags = useMemo(() => teamTags(teamNames), [teamNames]);
+  // Rows glide to their new rank instead of teleporting. The signature
+  // includes the expanded card so row positions re-measure on toggle.
+  const flipRef = useFlipList(`${order.join('.')}:${selected}`);
 
   return (
     <div className="standings">
@@ -83,9 +87,9 @@ export function Standings({ snap, jt, teamNames, tMs, durationMs, selected, onSe
                 ? wp.label
                 : jt.positionLabel(pos);
           const isSel = selected === teamIdx;
-          const arrow = mom[teamIdx] > 0 ? '▲' : mom[teamIdx] < 0 ? '▼' : '·';
+          const arrow = mom[teamIdx] > 0 ? '▲' : mom[teamIdx] < 0 ? '▼' : '';
           return (
-            <li key={teamIdx}>
+            <li key={teamIdx} ref={flipRef(String(teamIdx))}>
               <button
                 className={`standing-row${isSel ? ' selected' : ''}${st.wiped ? ' wiped' : ''}`}
                 onClick={() => onSelect(isSel ? null : teamIdx)}
@@ -101,7 +105,9 @@ export function Standings({ snap, jt, teamNames, tMs, durationMs, selected, onSe
                     <span className={`st-ico st-${st.motionKind}`} aria-hidden>
                       {STATE_ICON[st.motionKind]}
                     </span>
-                    {where} · {st.activity}
+                    {st.activity.toLowerCase().includes(where.toLowerCase())
+                      ? st.activity
+                      : `${where} · ${st.activity}`}
                   </span>
                 </span>
                 <span
@@ -133,6 +139,44 @@ export function Standings({ snap, jt, teamNames, tMs, durationMs, selected, onSe
         })}
       </ol>
     </div>
+  );
+}
+
+/**
+ * The headline number of a team card: a 260° dial. Arc length of the dial
+ * path below is 26 × (260° in radians) ≈ 118 — the dash math depends on it.
+ */
+function ReadyGauge({ value }: { value: number }) {
+  const L = 118;
+  const v = Math.max(0, Math.min(100, value));
+  const tone = v < 35 ? 'var(--danger)' : v < 60 ? 'var(--warn)' : 'var(--ok)';
+  return (
+    <svg viewBox="0 0 64 58" className="ready-gauge" role="img" aria-label={`Readiness ${v}%`}>
+      <path
+        d="M 12.1 48.7 A 26 26 0 1 1 51.9 48.7"
+        fill="none"
+        stroke="rgba(150, 180, 226, 0.1)"
+        strokeWidth={5}
+        strokeLinecap="round"
+      />
+      {v >= 1 && (
+        <path
+          d="M 12.1 48.7 A 26 26 0 1 1 51.9 48.7"
+          fill="none"
+          stroke={tone}
+          strokeWidth={5}
+          strokeLinecap="round"
+          strokeDasharray={`${(v / 100) * L} ${L + 4}`}
+          className="ready-gauge-arc"
+        />
+      )}
+      <text x={32} y={37} textAnchor="middle" className="ready-gauge-num">
+        {v}
+      </text>
+      <text x={32} y={48} textAnchor="middle" className="ready-gauge-pct">
+        %
+      </text>
+    </svg>
   );
 }
 
@@ -176,14 +220,18 @@ function TeamCard({
   return (
     <div className="team-card">
       {wiped && <div className="team-card-wiped">{jt.wipedCard}</div>}
-      <div className={`team-card-cols${dossier ? ' dossier-cols' : ''}`}>
-        <div>
-          <h3>
-            {dossier
-              ? `Sponsored by ${teamName} · ${snap.styles[teamIdx]}`
-              : `${jt.squadTitle} · ${snap.styles[teamIdx]}`}
-          </h3>
-          {dossier ? (
+      <div className="team-card-head">
+        <h3>
+          {dossier
+            ? `Sponsored by ${teamName} · ${snap.styles[teamIdx]}`
+            : `${jt.squadTitle} · ${snap.styles[teamIdx]}`}
+        </h3>
+        <div className="ready-gauge-wrap">
+          <ReadyGauge value={m.readiness} />
+          <span className="ready-gauge-caption">{jt.readinessLabel}</span>
+        </div>
+      </div>
+      {dossier ? (
             <ul className="roster dossier">
               {squad.map((c, ci) => {
                 const status = climberStatus[ci];
@@ -218,10 +266,12 @@ function TeamCard({
                           {jt.positionLabel(displayPosAt(snap, teamIdx, death.tMs))}
                         </span>
                       ) : (
-                        <span className="dossier-vitals">
+                        <span
+                          className={`dossier-vitals${v.alive && v.output <= 30 ? ' vitals-low' : ''}`}
+                        >
                           {v.alive && status !== 'turned-back' ? (
                             <>
-                              SpO₂ <strong>{v.spo2}</strong> · output{' '}
+                              SpO₂ <strong>{v.spo2}%</strong> · output{' '}
                               <strong>{v.output}</strong> · {v.note}
                             </>
                           ) : (
@@ -245,28 +295,23 @@ function TeamCard({
                 </li>
               ))}
             </ul>
-          )}
-        </div>
-        <div>
-          <h3>Supplies & condition</h3>
-          <ul className="meterlist">
-            {bars.map(([label, v]) => (
-              <li key={label}>
-                <span className="meter-label">{label}</span>
-                <span className="meter-bar">
-                  <span
-                    style={{ width: `${v}%` }}
-                    className={v < 30 ? 'low' : v < 60 ? 'mid' : ''}
-                  />
-                </span>
-                <span className="meter-val">{v}</span>
-              </li>
-            ))}
-          </ul>
-          <div className="readiness-line">
-            {jt.readinessLabel}: <strong>{m.readiness}%</strong>
-          </div>
-        </div>
+      )}
+      <div className="team-card-meters">
+        <h3>Supplies & condition</h3>
+        <ul className="meterlist meterlist-2col">
+          {bars.map(([label, v]) => (
+            <li key={label} title={`${label}: ${v} / 100`}>
+              <span className="meter-label">{label}</span>
+              <span className="meter-bar">
+                <span
+                  style={{ width: `${v}%` }}
+                  className={v < 30 ? 'low' : v < 60 ? 'mid' : ''}
+                />
+              </span>
+              <span className="meter-val">{v}</span>
+            </li>
+          ))}
+        </ul>
       </div>
     </div>
   );

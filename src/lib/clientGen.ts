@@ -1,7 +1,6 @@
 import type { CreateRaceInput, RaceConfigStored, Theme } from './races';
 import { buildChunks, serializeUpload, type BuiltChunks } from './chunking';
 import type { EverestTimeline } from '@/themes/everest/types';
-import type { OlympicsTimeline } from '@/themes/olympics/types';
 
 /**
  * Client-side race generation for the chunk protocol. Loaded lazily (the
@@ -15,15 +14,8 @@ export async function generateTimelineFor(
   seed: string,
   teams: RaceConfigStored['teams'],
   durationMs: number,
-): Promise<EverestTimeline | OlympicsTimeline> {
-  if (theme === 'olympics') {
-    const { generateOlympics } = await import('@/themes/olympics/generate');
-    return generateOlympics(seed, { teams, durationMs });
-  }
-  if (theme === 'space') {
-    const { generateSpace } = await import('@/themes/space/generate');
-    return generateSpace(seed, { teams, durationMs });
-  }
+): Promise<EverestTimeline> {
+  void theme;
   const { generateEverest } = await import('@/themes/everest/generate');
   return generateEverest(seed, { teams, durationMs });
 }

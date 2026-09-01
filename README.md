@@ -9,7 +9,7 @@ share one link and check in from their phones at any point; there is always
 something happening; and the outcome stays genuinely undecided until the final
 act.
 
-Three themes ship today, all skins over the same fair core:
+One theme, built deep rather than wide:
 
 - **🏔 Everest Expedition** — every name sponsors a squad of four generated
   climbers: real-feeling people with heritage-consistent names, portraits,
@@ -24,13 +24,6 @@ Three themes ship today, all skins over the same fair core:
   were lost, short-handed squads visibly climb slower, and a results
   memorial names everyone the mountain kept. Order of summiting is the
   result.
-- **🏅 The Games** — delegations compete across a full Olympic programme with
-  live events, a medal table, and backloaded marquee events; the closing
-  event decides gold. Final points table is the result.
-- **🚀 The Mars Run** — crews race 78 million kilometres through slingshots,
-  solar storms, and resupply loops, converging at Mars Approach Staging while
-  the dust storm over the landing site clears, then a powered-descent finale.
-  Order of touchdown is the result.
 
 ## Fairness, precisely
 
@@ -122,17 +115,10 @@ src/themes/everest/  Route DAG w/ risk-graded parallel edges, rotation
                      vitals, storm windows, deaths with structured causes,
                      wipeouts (bottom placements only, late), event log +
                      commentary template library.
-src/themes/olympics/ Event schedule concluding on core checkpoints,
-                     integer points tables realizing each standings order,
-                     marquee convergence, live within-event lane curves,
-                     its own commentary.
-src/themes/space/    The Mars run: journey machinery on a trajectory route
-                     (risk-graded slingshots), orbital loop-backs, crews,
-                     mission-control commentary, starfield map.
 src/lib/             SQLite storage, validation, spoiler-proof slicing.
 src/app/             Landing, create form, race page, API routes.
 src/components/      Race client: server-offset clock, polling, mountain
-                     map (SVG), standings/medal table, dispatches feed,
+                     map (SVG + 3D massif), standings, dispatches feed,
                      rank bump chart, finale views, results, playback bar.
 ```
 

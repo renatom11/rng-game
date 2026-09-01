@@ -10,6 +10,8 @@ import {
   teamStatesAt,
 } from '@/lib/client/raceState';
 import type { JourneyTheme } from '@/lib/client/journeyTheme';
+import { useFlipList } from './useFlip';
+import { fmtClock } from './useRaceClock';
 
 interface Props {
   snap: JourneySnapshot;
@@ -33,6 +35,18 @@ export function FinaleSidebar({ snap, jt, teamNames, tMs }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [snap, tick],
   );
+  // Arrival clock per team — the repeated "8,849 m" told nobody anything.
+  const arrivedAt = useMemo(() => {
+    const m = new Map<number, number>();
+    for (const e of snap.events) {
+      if (e.tMs > tMs) break;
+      if (e.type === 'summit' && e.teamIdx !== undefined && !m.has(e.teamIdx)) {
+        m.set(e.teamIdx, e.tMs);
+      }
+    }
+    return m;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [snap, tick]);
   const states = useMemo(
     () => teamStatesAt(snap, n, tMs, jt),
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -46,11 +60,16 @@ export function FinaleSidebar({ snap, jt, teamNames, tMs }: Props) {
     return null;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [snap, tick]);
+  const flipRef = useFlipList(order.join('.'));
 
   return (
     <div className="finale-board">
       <h2 className="finale-title">{jt.finaleTitle}</h2>
       {headline && <p className="finale-headline">{headline.text}</p>}
+      <p className="finale-legend" aria-hidden>
+        <span className="pip pip-on" /> still moving · <span className="pip pip-out" /> turned
+        back · <span className="pip pip-lost">✕</span> lost
+      </p>
       <ol className="finale-list">
         {order.map((teamIdx, i) => {
           const isUp = summited.has(teamIdx);
@@ -59,6 +78,7 @@ export function FinaleSidebar({ snap, jt, teamNames, tMs }: Props) {
           return (
             <li
               key={teamIdx}
+              ref={flipRef(String(teamIdx))}
               className={`finale-row${isUp ? ' summited' : ''}${wiped ? ' wiped' : ''}`}
             >
               <span className="finale-rank">{isUp ? '✓' : i + 1}</span>
@@ -87,7 +107,7 @@ export function FinaleSidebar({ snap, jt, teamNames, tMs }: Props) {
                 {wiped
                   ? jt.lostShort
                   : isUp
-                    ? jt.positionLabel(1)
+                    ? `${jt.finaleArrivedPrefix ?? 'up at'} ${fmtClock(arrivedAt.get(teamIdx) ?? tMs)}`
                     : jt.positionLabel(displayPosAt(snap, teamIdx, tMs))}
               </span>
             </li>

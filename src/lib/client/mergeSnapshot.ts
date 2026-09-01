@@ -1,8 +1,4 @@
-import type {
-  JourneySnapshot,
-  OlympicsSnapshot,
-  PublicSnapshot,
-} from '@/lib/slice';
+import type { JourneySnapshot, PublicSnapshot } from '@/lib/slice';
 
 /**
  * Merge a delta snapshot (sinceMs >= 0, series covering (since, horizon])
@@ -20,13 +16,7 @@ export function mergeSnapshot(
   if (prev.theme !== next.theme) return null;
   if (next.sinceMs !== prev.horizonMs) return null; // gap or overlap — refetch
 
-  if (prev.theme === 'olympics' && next.theme === 'olympics') {
-    return mergeOlympics(prev, next);
-  }
-  if (prev.theme !== 'olympics' && next.theme !== 'olympics') {
-    return { ...mergeJourney(prev, next), theme: prev.theme };
-  }
-  return null;
+  return { ...mergeJourney(prev, next), theme: prev.theme };
 }
 
 function mergeJourney(
@@ -67,49 +57,4 @@ function mergeJourney(
     },
     wipeouts: [...prev.wipeouts, ...next.wipeouts],
   };
-}
-
-function mergeOlympics(
-  prev: OlympicsSnapshot,
-  next: OlympicsSnapshot,
-): OlympicsSnapshot {
-  return {
-    theme: 'olympics',
-    horizonMs: next.horizonMs,
-    sinceMs: prev.sinceMs,
-    complete: false,
-    athletes: prev.athletes,
-    colors: prev.colors,
-    pushStartMs: next.pushStartMs,
-    schedule: prev.schedule,
-    pointsKeyframes: [...prev.pointsKeyframes, ...next.pointsKeyframes],
-    live: mergeLiveCurves(prev.live, next.live),
-    events: [...prev.events, ...next.events],
-  };
-}
-
-/**
- * Concatenate per-event live curves positionally. Either side may hold null
- * for an event with nothing in its window, so a curve can start in a later
- * chunk than the one that first mentioned the event.
- */
-function mergeLiveCurves(
-  prev: OlympicsSnapshot['live'],
-  next: OlympicsSnapshot['live'],
-): OlympicsSnapshot['live'] {
-  const count = Math.max(prev.length, next.length);
-  const out: OlympicsSnapshot['live'] = [];
-  for (let k = 0; k < count; k++) {
-    const a = prev[k] ?? null;
-    const b = next[k] ?? null;
-    if (!a || !b) {
-      out.push(a ?? b);
-      continue;
-    }
-    out.push({
-      tMs: [...a.tMs, ...b.tMs],
-      score: a.score.map((row, i) => [...row, ...(b.score[i] ?? [])]),
-    });
-  }
-  return out;
 }

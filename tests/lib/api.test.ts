@@ -170,13 +170,4 @@ describe('race API under the chunk protocol', () => {
     );
   });
 
-  it('olympics races flow through the same protocol', async () => {
-    const race = await createFull({ theme: 'olympics', startAtMs: NOW + 60_000 });
-    const mid = await envelope(race.slug, NOW + 60_000 + 200_000);
-    expect(mid.data.chunks.length).toBeGreaterThan(0);
-    expect(mid.raw).not.toContain('"finalOrder"');
-    const done = await envelope(race.slug, NOW + 60_000 + 600_001);
-    expect(done.data.complete).toBe(true);
-    expect(done.data.finals).not.toBeNull();
-  });
 });

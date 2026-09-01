@@ -1,10 +1,4 @@
 import type { EverestTimeline, RaceEvent } from '@/themes/everest/types';
-import type {
-  OlympicsRaceEvent,
-  OlympicsTimeline,
-  PointsKeyframe,
-  ScheduledEvent,
-} from '@/themes/olympics/types';
 import type { Checkpoint } from '@/engine/types';
 
 /**
@@ -90,32 +84,7 @@ export interface JourneySnapshot {
 }
 
 export type EverestSnapshot = JourneySnapshot & { theme: 'everest' };
-export type SpaceSnapshot = JourneySnapshot & { theme: 'space' };
-
-export interface OlympicsSnapshot {
-  theme: 'olympics';
-  horizonMs: number;
-  /** -1 = full snapshot; otherwise a delta covering (sinceMs, horizonMs]. */
-  sinceMs: number;
-  complete: boolean;
-  athletes: OlympicsTimeline['athletes'];
-  colors: string[];
-  pushStartMs: number;
-  /** Full schedule metadata is public — only results are spoilers. */
-  schedule: ScheduledEvent[];
-  pointsKeyframes: PointsKeyframe[];
-  /**
-   * Per-event score curves, positional by event index. `null` means "this
-   * event has nothing in this window" — spelling that out as an object full
-   * of empty arrays cost megabytes once a race had thousands of chunks.
-   */
-  live: (OlympicsLiveCurve | null)[];
-  events: OlympicsRaceEvent[];
-  finalOrder?: number[];
-  finalRank?: number[];
-}
-
-export type PublicSnapshot = EverestSnapshot | SpaceSnapshot | OlympicsSnapshot;
+export type PublicSnapshot = EverestSnapshot;
 
 /** Index of the last entry in sorted `times` that is <= tMs (or -1). */
 function lastIndexAtOrBefore(times: number[], tMs: number): number {
@@ -140,7 +109,7 @@ function windowRange(
   return [lo, Math.max(lo, hi)];
 }
 
-export function toJourneySnapshot<T extends 'everest' | 'space'>(
+export function toJourneySnapshot<T extends 'everest'>(
   theme: T,
   timeline: EverestTimeline,
   elapsedMs: number,
@@ -239,81 +208,3 @@ export function toEverestSnapshot(
   return toJourneySnapshot('everest', timeline, elapsedMs, opts);
 }
 
-export function toSpaceSnapshot(
-  timeline: EverestTimeline,
-  elapsedMs: number,
-  opts: { complete: boolean; sinceMs?: number },
-): SpaceSnapshot {
-  return toJourneySnapshot('space', timeline, elapsedMs, opts);
-}
-
-export function toOlympicsSnapshot(
-  timeline: OlympicsTimeline,
-  elapsedMs: number,
-  opts: { complete: boolean; sinceMs?: number },
-): OlympicsSnapshot {
-  const { core } = timeline;
-  const durationMs = core.grid.tMs[core.grid.tMs.length - 1];
-
-  if (opts.complete) {
-    return {
-      theme: 'olympics',
-      horizonMs: durationMs,
-      sinceMs: -1,
-      complete: true,
-      athletes: timeline.athletes,
-      colors: timeline.colors,
-      pushStartMs: core.pushStartMs,
-      schedule: timeline.schedule,
-      pointsKeyframes: timeline.pointsKeyframes,
-      live: timeline.live,
-      events: timeline.events,
-      finalOrder: core.finalOrder,
-      finalRank: core.finalRank,
-    };
-  }
-
-  const horizonMs = horizonFor(elapsedMs, durationMs, core.pushStartMs);
-  const sinceMs =
-    opts.sinceMs !== undefined && opts.sinceMs >= 0 && opts.sinceMs <= horizonMs
-      ? opts.sinceMs
-      : -1;
-  return toOlympicsWindow(timeline, sinceMs, horizonMs);
-}
-
-export interface OlympicsLiveCurve {
-  tMs: number[];
-  score: number[][];
-}
-
-/** Exact-window slice for the Olympics shape; see toJourneyWindow. */
-export function toOlympicsWindow(
-  timeline: OlympicsTimeline,
-  sinceMs: number,
-  horizonMs: number,
-): OlympicsSnapshot {
-  const { core } = timeline;
-  const delta = sinceMs >= 0;
-  const inWindow = (t: number) => t > sinceMs && t <= horizonMs;
-
-  return {
-    theme: 'olympics',
-    horizonMs,
-    sinceMs,
-    complete: false,
-    athletes: delta ? [] : timeline.athletes,
-    colors: delta ? [] : timeline.colors,
-    pushStartMs: core.pushStartMs,
-    schedule: delta ? [] : timeline.schedule,
-    pointsKeyframes: timeline.pointsKeyframes.filter((f) => inWindow(f.tMs)),
-    live: timeline.live.map((lv) => {
-      const [lo, hi] = windowRange(lv.tMs, sinceMs, horizonMs);
-      if (lo >= hi) return null;
-      return {
-        tMs: lv.tMs.slice(lo, hi),
-        score: lv.score.map((row) => row.slice(lo, hi)),
-      };
-    }),
-    events: timeline.events.filter((e) => inWindow(e.tMs)),
-  };
-}

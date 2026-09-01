@@ -1,13 +1,11 @@
 import { PUSH_U } from '@/engine/types';
 import {
   toJourneyWindow,
-  toOlympicsWindow,
   preLookaheadMs,
   pushLookaheadMs,
   type PublicSnapshot,
 } from './slice';
 import type { EverestTimeline } from '@/themes/everest/types';
-import type { OlympicsTimeline } from '@/themes/olympics/types';
 import type { Theme } from './races';
 
 /**
@@ -81,10 +79,6 @@ export function boundariesFor(durationMs: number): number[] {
   return bounds;
 }
 
-function isJourney(theme: Theme): theme is 'everest' | 'space' {
-  return theme === 'everest' || theme === 'space';
-}
-
 /**
  * Slice a full timeline into the chunk list + finals. Chunk 0 covers
  * (-∞, b0] with statics; chunk i covers (b(i-1), b(i)]. Bodies are the
@@ -93,7 +87,7 @@ function isJourney(theme: Theme): theme is 'everest' | 'space' {
  */
 export function buildChunks(
   theme: Theme,
-  timeline: EverestTimeline | OlympicsTimeline,
+  timeline: EverestTimeline,
   durationMs: number,
 ): BuiltChunks {
   const bounds = boundariesFor(durationMs);
@@ -101,19 +95,15 @@ export function buildChunks(
   for (let i = 0; i < bounds.length; i++) {
     const fromMs = i === 0 ? -1 : bounds[i - 1];
     const toMs = bounds[i];
-    const snap: PublicSnapshot = isJourney(theme)
-      ? toJourneyWindow(theme, timeline as EverestTimeline, fromMs, toMs)
-      : toOlympicsWindow(timeline as OlympicsTimeline, fromMs, toMs);
+    const snap: PublicSnapshot = toJourneyWindow(theme, timeline, fromMs, toMs);
     chunks.push({ meta: { idx: i, fromMs, toMs }, body: JSON.stringify(snap) });
   }
   const core = timeline.core;
-  const finals = isJourney(theme)
-    ? {
-        finalOrder: core.finalOrder,
-        finalRank: core.finalRank,
-        summitTimesMs: core.summitTimesMs,
-      }
-    : { finalOrder: core.finalOrder, finalRank: core.finalRank };
+  const finals = {
+    finalOrder: core.finalOrder,
+    finalRank: core.finalRank,
+    summitTimesMs: core.summitTimesMs,
+  };
   return { chunks, finalsBody: JSON.stringify(finals) };
 }
 

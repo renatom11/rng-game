@@ -11,33 +11,33 @@ import {
 import {
   EDGE_GEOMETRY,
   NODE_XY,
-  SILHOUETTES,
-  STARS,
   VIEW_H,
   VIEW_W,
   markerXY,
 } from '@/themes/everest/map-geometry';
 import { NODES } from '@/themes/everest/route';
 import { deathCauseLabel } from '@/lib/client/causeLabels';
+import { MountainScene, sceneLight } from '@/themes/everest/scene';
 
 const SEG_BY_EDGE = new Map(EDGE_GEOMETRY.map((e) => [e.id, e.segIdx]));
 
 const RISK_COLOR: Record<string, string> = {
-  safe: '#3d5f86',
-  medium: '#4b6a8f',
-  risky: '#8a6a3d',
+  safe: '#7396bc',
+  medium: '#9db9da',
+  risky: '#d2a05e',
 };
 
 interface Props {
   snap: JourneySnapshot;
   teamNames: string[];
   tMs: number;
+  durationMs: number;
   selected: number | null;
   onSelect: (teamIdx: number | null) => void;
   finale: boolean;
 }
 
-export function MountainMap({ snap, teamNames, tMs, selected, onSelect, finale }: Props) {
+export function MountainMap({ snap, teamNames, tMs, durationMs, selected, onSelect, finale }: Props) {
   const n = teamNames.length;
   const tags = useMemo(() => teamTags(teamNames), [teamNames]);
 
@@ -52,16 +52,55 @@ export function MountainMap({ snap, teamNames, tMs, selected, onSelect, finale }
     [snap, n, Math.floor(tMs / 2000)],
   );
 
-  // Marker positions with fan-out for co-located teams.
+  // Storm intensity right now, eased in/out at the edges, for the blizzard.
+  const stormIntensity = useMemo(() => {
+    let best = 0;
+    for (const st of snap.storms ?? []) {
+      const len = st.endMs - st.startMs;
+      const edge = Math.max(2_000, Math.min(60_000, len * 0.2));
+      const ramp = Math.min(
+        1,
+        Math.max(0, (tMs - (st.startMs - edge)) / edge),
+        Math.max(0, (st.endMs + edge - tMs) / edge),
+      );
+      best = Math.max(best, ramp);
+    }
+    return best;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [snap.storms, Math.floor(tMs / 1000)]);
+
+  // The hour on the mountain: race progress drives the light.
+  const light = useMemo(
+    () => sceneLight(durationMs > 0 ? tMs / durationMs : 0, stormIntensity),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [Math.floor(tMs / 1000), durationMs, stormIntensity],
+  );
+  const lampAmt = Math.max(0, Math.min(1, (light.darkness - 0.45) * 1.8));
+
+  // Deterministic flake field (no randomness at render time).
+  const flakes = useMemo(
+    () =>
+      Array.from({ length: 64 }, (_, i) => ({
+        x: (i * 173) % (VIEW_W + 200) - 100,
+        y: ((i * 97) % (VIEW_H + 300)) - 150,
+        len: 7 + (i % 5) * 3,
+        dur: 2.4 + ((i * 31) % 17) / 10,
+        delay: -(((i * 53) % 40) / 10),
+      })),
+    [],
+  );
+
+  // Marker positions with fan-out for genuinely overlapping dots.
   const markers = useMemo(() => {
     const raw = Array.from({ length: n }, (_, i) => {
       const pos = displayPosAt(snap, i, tMs);
       const [x, y] = markerXY(pos, choices[i]);
       return { teamIdx: i, pos, x, y };
     });
+
     // Summited teams park in a tidy cluster under the peak, in arrival
-    // order — the generic overlap fan used to spread a dozen victorious
-    // dots across the whole ridge, which read as chaos, not triumph.
+    // order — a victorious pile fanned across the whole ridge read as
+    // chaos, not triumph.
     const summitOrder: number[] = [];
     for (const e of snap.events) {
       if (e.tMs > tMs) break;
@@ -70,8 +109,6 @@ export function MountainMap({ snap, teamNames, tMs, selected, onSelect, finale }
       }
     }
     const atTop = raw.filter((m) => m.pos >= 0.9999);
-    // Events can lag the track by a beat; anyone standing on the top
-    // without a delivered summit line queues after the announced ones.
     for (const m of atTop) {
       if (!summitOrder.includes(m.teamIdx)) summitOrder.push(m.teamIdx);
     }
@@ -85,9 +122,7 @@ export function MountainMap({ snap, teamNames, tMs, selected, onSelect, finale }
       parked.add(m.teamIdx);
     }
 
-    // Fan out only dots that genuinely overlap ON SCREEN. Bucketing by
-    // progress alone shoved teams sideways even when their chosen routes
-    // already separated them — which read as dots wandering off their line.
+    // Fan out only dots that genuinely overlap ON SCREEN.
     const buckets = new Map<string, typeof raw>();
     for (const m of raw) {
       if (parked.has(m.teamIdx)) continue;
@@ -108,8 +143,7 @@ export function MountainMap({ snap, teamNames, tMs, selected, onSelect, finale }
     return raw;
   }, [snap, n, tMs, choices]);
 
-  // Where people were lost: a small red ✕ stays on the mountain at each
-  // death site (delivered events only — the map can never foreshadow).
+  // Where people were lost — hover (or tap) for who, which team, and how.
   const deathMarks = useMemo(() => {
     const out: {
       x: number; y: number; big: boolean; key: string;
@@ -158,36 +192,6 @@ export function MountainMap({ snap, teamNames, tMs, selected, onSelect, finale }
     return set;
   }, [markers, choices, n]);
 
-  // Storm intensity right now, eased in/out at the edges, for the blizzard.
-  const stormIntensity = useMemo(() => {
-    let best = 0;
-    for (const st of snap.storms ?? []) {
-      const len = st.endMs - st.startMs;
-      const edge = Math.max(2_000, Math.min(60_000, len * 0.2));
-      const ramp = Math.min(
-        1,
-        Math.max(0, (tMs - (st.startMs - edge)) / edge),
-        Math.max(0, (st.endMs + edge - tMs) / edge),
-      );
-      best = Math.max(best, ramp);
-    }
-    return best;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [snap.storms, Math.floor(tMs / 1000)]);
-
-  // Deterministic flake field (no randomness at render time).
-  const flakes = useMemo(
-    () =>
-      Array.from({ length: 64 }, (_, i) => ({
-        x: (i * 173) % (VIEW_W + 200) - 100,
-        y: ((i * 97) % (VIEW_H + 300)) - 150,
-        len: 7 + (i % 5) * 3,
-        dur: 2.4 + ((i * 31) % 17) / 10,
-        delay: -(((i * 53) % 40) / 10),
-      })),
-    [],
-  );
-
   // Finale zoom: show the Col -> Summit portion.
   const zoom = finale
     ? { bx: 660, by: 30, bw: 360, bh: 560 }
@@ -205,18 +209,18 @@ export function MountainMap({ snap, teamNames, tMs, selected, onSelect, finale }
       onClick={() => onSelect(null)}
     >
       <defs>
-        <linearGradient id="skyGrad" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#050810" />
-          <stop offset="55%" stopColor="#0a1220" />
-          <stop offset="100%" stopColor="#0f1a2e" />
-        </linearGradient>
-        <radialGradient id="summitGlow" cx="0.5" cy="0.5" r="0.5">
-          <stop offset="0%" stopColor="#cfe8ff" stopOpacity="0.35" />
-          <stop offset="100%" stopColor="#cfe8ff" stopOpacity="0" />
+        <filter id="routeGlow" x="-30%" y="-30%" width="160%" height="160%">
+          <feGaussianBlur stdDeviation="4" />
+        </filter>
+        <radialGradient id="campGlowG" cx="0.5" cy="0.5" r="0.5">
+          <stop offset="0%" stopColor="#ffd9a0" stopOpacity="0.65" />
+          <stop offset="100%" stopColor="#ffd9a0" stopOpacity="0" />
         </radialGradient>
+        <linearGradient id="lampConeG" x1="0" y1="1" x2="0" y2="0">
+          <stop offset="0%" stopColor="#ffe9b0" stopOpacity="0.7" />
+          <stop offset="100%" stopColor="#ffe9b0" stopOpacity="0" />
+        </linearGradient>
       </defs>
-
-      <rect x="0" y="0" width={VIEW_W} height={VIEW_H} fill="url(#skyGrad)" />
 
       <g
         style={{
@@ -224,29 +228,36 @@ export function MountainMap({ snap, teamNames, tMs, selected, onSelect, finale }
           transition: 'transform 1600ms cubic-bezier(0.4, 0, 0.2, 1)',
         }}
       >
-        {STARS.map(([x, y, r], i) => (
-          <circle key={i} cx={x} cy={y} r={r} fill="#dfe9f7" opacity={0.5} />
-        ))}
-        <circle cx={936} cy={118} r={90} fill="url(#summitGlow)" />
+        {/* the painted mountain, lit by the hour of the race */}
+        <MountainScene light={light} />
 
-        {SILHOUETTES.map((sil, i) => (
-          <path key={i} d={sil.path} fill={sil.fill} />
-        ))}
-
-        {/* Route edges */}
+        {/* Route edges: quiet unless someone is on them */}
         {EDGE_GEOMETRY.map((e) => {
           const active = activeEdges.has(e.id);
           return (
-            <path
-              key={e.id}
-              d={e.path}
-              fill="none"
-              stroke={RISK_COLOR[e.risk]}
-              strokeWidth={active ? 3 : 1.6}
-              strokeDasharray={e.risk === 'risky' ? '7 5' : e.risk === 'safe' ? '2 4' : undefined}
-              opacity={active ? 0.95 : 0.45}
-              strokeLinecap="round"
-            />
+            <g key={e.id}>
+              {active && (
+                <path
+                  d={e.path}
+                  fill="none"
+                  stroke={lampAmt > 0.4 ? '#9fd9ff' : '#e8f2ff'}
+                  strokeWidth={5.5}
+                  opacity={0.22 + lampAmt * 0.16}
+                  filter="url(#routeGlow)"
+                  strokeLinecap="round"
+                />
+              )}
+              <path
+                d={e.path}
+                fill="none"
+                stroke={active ? '#dcebfb' : RISK_COLOR[e.risk]}
+                strokeWidth={active ? 2.3 : 1.3}
+                strokeDasharray={e.risk === 'risky' ? '7 5' : e.risk === 'safe' ? '2 4' : undefined}
+                opacity={active ? 0.95 : 0.34}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </g>
           );
         })}
 
@@ -254,35 +265,51 @@ export function MountainMap({ snap, teamNames, tMs, selected, onSelect, finale }
         {NODES.map((node) => {
           const [x, y] = NODE_XY[node.id];
           const major = !['BALC', 'SSUM', 'HILL'].includes(node.id);
+          const summit = node.id === 'SUMMIT';
           return (
             <g key={node.id}>
-              <circle
-                cx={x}
-                cy={y}
-                r={major ? 7 : 4}
-                fill={node.id === 'SUMMIT' ? '#f4e9c9' : '#101b30'}
-                stroke="#7c93b5"
-                strokeWidth={1.5}
-              />
-              <text
-                x={x + (node.id === 'SUMMIT' ? -12 : 14)}
-                y={y - (node.id === 'SUMMIT' ? 16 : major ? 3 : 2)}
-                textAnchor={node.id === 'SUMMIT' ? 'end' : 'start'}
-                className={major ? 'mtn-label' : 'mtn-label mtn-label-minor'}
-              >
-                {node.label}
-              </text>
-              <text
-                x={x + (node.id === 'SUMMIT' ? -12 : 14)}
-                y={y + (node.id === 'SUMMIT' ? -2 : major ? 15 : 12)}
-                textAnchor={node.id === 'SUMMIT' ? 'end' : 'start'}
-                className="mtn-alt"
-              >
-                {node.alt.toLocaleString()} m
-              </text>
+              {major && !summit && (
+                <>
+                  <circle cx={x} cy={y} r={20} fill="url(#campGlowG)" opacity={lampAmt} />
+                  <g transform={`translate(${x}, ${y})`}>
+                    <path
+                      d="M-8 5 L0 -7 L8 5 Z"
+                      fill={lampAmt > 0.4 ? '#2c3450' : '#111b2e'}
+                      stroke="#aebfda"
+                      strokeWidth={1.6}
+                      strokeLinejoin="round"
+                    />
+                    <path d="M-2.4 5 L0 1 L2.4 5 Z" fill={lampAmt > 0.2 ? '#ffd9a0' : '#3a4864'} />
+                  </g>
+                </>
+              )}
+              {!major && (
+                <circle cx={x} cy={y} r={3.6} fill="#101b30" stroke="#8ea3c4" strokeWidth={1.4} />
+              )}
+              {summit && (
+                <circle cx={x} cy={y} r={7} fill="#f6ecce" stroke="#c9b273" strokeWidth={1.6} />
+              )}
             </g>
           );
         })}
+
+        {/* Snowfall is always breathing; a storm closes the sky on top */}
+        {(
+          <g className="mtn-blizzard" opacity={0.22 + stormIntensity * 0.78} aria-hidden>
+            <rect x={-100} y={-100} width={VIEW_W + 200} height={VIEW_H + 200} fill="#aebfd6" opacity={0.16 * stormIntensity} />
+            {flakes.map((fl, i) => (
+              <line
+                key={i}
+                x1={fl.x}
+                y1={fl.y}
+                x2={fl.x - fl.len * 0.7}
+                y2={fl.y + fl.len}
+                className="mtn-flake"
+                style={{ animationDuration: `${fl.dur}s`, animationDelay: `${fl.delay}s` }}
+              />
+            ))}
+          </g>
+        )}
 
         {/* Death sites — hover (or tap) for who, which team, and how */}
         {deathMarks.map((d) => (
@@ -308,25 +335,25 @@ export function MountainMap({ snap, teamNames, tMs, selected, onSelect, finale }
           </g>
         ))}
 
-        {/* Blizzard: the sky closing in while a storm window is open */}
-        {stormIntensity > 0 && (
-          <g className="mtn-blizzard" opacity={stormIntensity} aria-hidden>
-            <rect x={-100} y={-100} width={VIEW_W + 200} height={VIEW_H + 200} fill="#aebfd6" opacity={0.16} />
-            {flakes.map((fl, i) => (
-              <line
-                key={i}
-                x1={fl.x}
-                y1={fl.y}
-                x2={fl.x - fl.len * 0.7}
-                y2={fl.y + fl.len}
-                className="mtn-flake"
-                style={{ animationDuration: `${fl.dur}s`, animationDelay: `${fl.delay}s` }}
-              />
-            ))}
-          </g>
-        )}
+        {/* A quiet cheer: brief expanding halos at the peak as teams arrive */}
+        {(() => {
+          const rings: { key: string; color: string }[] = [];
+          for (const e of snap.events) {
+            if (e.tMs > tMs) break;
+            if (e.type === 'summit' && e.teamIdx !== undefined && tMs - e.tMs < 3600) {
+              rings.push({ key: `${e.teamIdx}-${e.tMs}`, color: snap.colors[e.teamIdx] });
+            }
+          }
+          const [sx, sy] = NODE_XY['SUMMIT'];
+          return rings.map((c) => (
+            <g key={c.key} aria-hidden pointerEvents="none">
+              <circle cx={sx} cy={sy} r={10} className="mtn-cheer" style={{ stroke: c.color }} />
+              <circle cx={sx} cy={sy} r={10} className="mtn-cheer mtn-cheer-b" style={{ stroke: c.color }} />
+            </g>
+          ));
+        })()}
 
-        {/* Team markers */}
+        {/* Team markers — headlamps on after dark */}
         {markers.map((m) => {
           const state = states[m.teamIdx];
           const color = snap.colors[m.teamIdx];
@@ -346,7 +373,14 @@ export function MountainMap({ snap, teamNames, tMs, selected, onSelect, finale }
                 onSelect(isSel ? null : m.teamIdx);
               }}
             >
-              {isSel && <circle r={17} fill="none" stroke={color} strokeWidth={2} opacity={0.7} />}
+              {!wiped && lampAmt > 0.05 && (
+                <g opacity={lampAmt} className="mtn-headlamp" transform="rotate(24)">
+                  <path d="M0 -5 L-9 -36 L9 -36 Z" fill="url(#lampConeG)" />
+                  <circle cy={-7} r={2.8} fill="#ffe9b0" />
+                </g>
+              )}
+              <ellipse cy={6} rx={9} ry={2.6} fill="#02050a" opacity={0.35} />
+              {isSel && <circle r={17} fill="none" stroke={color} strokeWidth={2} opacity={0.75} />}
               <circle r={10} fill={color} stroke="#0a1220" strokeWidth={2.5} />
               {wiped ? (
                 <text y={4.5} textAnchor="middle" className="mtn-tag" fill="#0a1220">✕</text>
@@ -358,11 +392,40 @@ export function MountainMap({ snap, teamNames, tMs, selected, onSelect, finale }
             </g>
           );
         })}
+
+        {/* Place names ride above the traffic — a chip never swallows one */}
+        <g pointerEvents="none">
+          {NODES.map((node) => {
+            const [x, y] = NODE_XY[node.id];
+            const major = !['BALC', 'SSUM', 'HILL'].includes(node.id);
+            const summit = node.id === 'SUMMIT';
+            return (
+              <g key={`lbl-${node.id}`}>
+                <text
+                  x={x + (summit ? -12 : 14)}
+                  y={y - (summit ? 16 : major ? 3 : 2)}
+                  textAnchor={summit ? 'end' : 'start'}
+                  className={major ? 'mtn-label' : 'mtn-label mtn-label-minor'}
+                >
+                  {node.label}
+                </text>
+                <text
+                  x={x + (summit ? -12 : 14)}
+                  y={y + (summit ? -2 : major ? 15 : 12)}
+                  textAnchor={summit ? 'end' : 'start'}
+                  className="mtn-alt"
+                >
+                  {node.alt.toLocaleString()} m
+                </text>
+              </g>
+            );
+          })}
+        </g>
       </g>
 
       {/* Route legend (fixed — does not zoom) */}
       <g transform={`translate(16, ${VIEW_H - 78})`} aria-hidden>
-        <rect x={-8} y={-18} width={208} height={72} rx={8} fill="#0a1220" opacity={0.72} />
+        <rect x={-8} y={-18} width={208} height={72} rx={10} fill="#060b14" opacity={0.78} />
         {(
           [
             ['risky', 'Risky — faster', '7 5'],
