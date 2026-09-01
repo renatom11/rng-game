@@ -51,7 +51,7 @@ function edgePoints(
   const px = -dy / len;
   const py = dx / len;
 
-  const laneAmp = 26;
+  const laneAmp = 20;
   const pts: [number, number][] = [];
   for (let i = 0; i <= samples; i++) {
     const t = i / samples;
@@ -66,14 +66,14 @@ function edgePoints(
     // Risk shape.
     if (risk === 'risky') {
       // Direct, slightly bowed into the slope.
-      off += -10 * taper;
+      off += -8 * taper;
     } else if (risk === 'medium') {
       // Gentle S.
-      off += 12 * Math.sin(2 * Math.PI * t) * taper;
+      off += 8 * Math.sin(2 * Math.PI * t) * taper;
     } else {
       // Switchbacks: visible zigzag, eased at the ends.
       const zig = Math.sin(t * Math.PI * 5);
-      off += 30 * zig * taper;
+      off += 14 * zig * taper;
     }
 
     pts.push([

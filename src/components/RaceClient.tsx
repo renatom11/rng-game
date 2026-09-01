@@ -257,6 +257,7 @@ export interface JourneyMapProps {
   snap: JourneySnapshot;
   teamNames: string[];
   tMs: number;
+  durationMs: number;
   selected: number | null;
   onSelect: (teamIdx: number | null) => void;
   finale: boolean;
@@ -292,6 +293,7 @@ function JourneyView({
             snap={snap}
             teamNames={teamNames}
             tMs={tMs}
+            durationMs={durationMs}
             selected={selected}
             onSelect={setSelected}
             finale={finale}

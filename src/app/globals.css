@@ -904,7 +904,7 @@ button { font-family: inherit; }
 .finale-rank { font-family: var(--font-display); font-variant-numeric: tabular-nums; color: var(--snow-dim); }
 .finale-row.summited .finale-rank { color: var(--gold); }
 .finale-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.finale-alt { font-family: var(--font-data); font-size: 0.72rem; color: var(--snow-dim); }
+.finale-alt { font-family: var(--font-data); font-size: 0.72rem; color: var(--snow-dim); white-space: nowrap; }
 
 /* ---------- results ---------- */
 .results { max-width: 760px; margin: 0 auto; padding-top: 3vh; }
@@ -1162,4 +1162,25 @@ button { font-family: inherit; }
   .feed-item { animation: none; }
   .cta, .cta:hover { transition: none; transform: none; }
   * { scroll-behavior: auto !important; }
+}
+
+/* ---------- painted-scene animation ---------- */
+.mtn-cloud { will-change: transform; }
+.mtn-cloud-a { animation: cloudDriftA 140s ease-in-out infinite alternate; }
+.mtn-cloud-b { animation: cloudDriftB 180s ease-in-out infinite alternate; }
+@keyframes cloudDriftA { from { transform: translateX(-70px); } to { transform: translateX(90px); } }
+@keyframes cloudDriftB { from { transform: translateX(60px); } to { transform: translateX(-80px); } }
+.mtn-star-twinkle { animation: twinkle 3.4s ease-in-out infinite; }
+@keyframes twinkle { 0%, 100% { opacity: 0.9; } 50% { opacity: 0.25; } }
+.mtn-beacon { animation: beacon 5s ease-in-out infinite; transform-origin: 936px 118px; }
+@keyframes beacon { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.14); } }
+.mtn-plume { animation: plume 9s ease-in-out infinite alternate; transform-origin: 940px 112px; }
+@keyframes plume { from { transform: scaleX(0.9) translateY(0); } to { transform: scaleX(1.12) translateY(-5px); } }
+.mtn-headlamp { animation: lampFlicker 2.8s ease-in-out infinite; }
+@keyframes lampFlicker { 0%, 100% { opacity: 1; } 47% { opacity: 0.82; } 53% { opacity: 0.95; } 71% { opacity: 0.85; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .mtn-cloud-a, .mtn-cloud-b, .mtn-star-twinkle, .mtn-beacon, .mtn-plume, .mtn-headlamp {
+    animation: none;
+  }
 }
