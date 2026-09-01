@@ -480,7 +480,7 @@ const ALB = {
   snowA: hex('#e9f0fa'), snowB: hex('#f7fafe'),
   cwm: hex('#f4f8ff'),
   ice: hex('#b6cfe7'),
-  rock: hex('#3d4a63'),
+  rock: hex('#53607b'),
   band: hex('#c2a668'),
   spur: hex('#39415a'),
   moraine: hex('#66655f'),
@@ -492,32 +492,30 @@ function mix(a: [number, number, number], b: [number, number, number], t: number
 }
 
 /** Albedo for a vertex, from altitude, slope (degrees) and region masks. */
-export function albedoAt(x: number, z: number, y: number, slopeDeg: number): [number, number, number] {
+export function albedoAt(
+  x: number, z: number, y: number, slopeDeg: number,
+  /** 0..1, how much this point stands above its neighbourhood (a crest). */
+  crest = 0,
+): [number, number, number] {
   const n = vnoise(x + 57, z + 991, 300);
-  // Below the snowline: glacier rubble and moraine.
-  if (y < 5820) {
-    const nearBC = Math.max(0, 1 - Math.hypot(x - WP3.BC[0], z - WP3.BC[2]) / 900);
-    return mix(mix(ALB.moraine, ALB.rubble, n), ALB.rubble, nearBC * 0.5);
-  }
   const fm = faceMask(x, z);
   // Every boundary below is a smooth blend, not a threshold: a hard cut
   // across noisy terrain fringes into a scratchy band that reads as a
   // rendering glitch rather than a geological contact.
   const band = smoothBand(y, 7330, 7660, 90) * smoothStep(0.2, 0.42, fm) * smoothStep(20, 34, slopeDeg);
-  const rockAmt = smoothStep(50, 64, slopeDeg);
+  const rockAmt = smoothStep(46, 68, slopeDeg) * (1 - crest * 0.85);
   const faceAmt =
     smoothStep(0.24, 0.42, fm) * smoothStep(26, 38, slopeDeg) * smoothBand(y, 6350, 8000, 260);
 
-  let base: [number, number, number];
   // The Lhotse Face is hard blue-grey ice, not snow.
   const ice = mix(ALB.ice, ALB.snowA, n * 0.35);
-  // The Cwm floor: blinding glacier white.
-  if (cwmMask(x, z) > 0.35 && slopeDeg < 26) base = ALB.cwm;
-  else {
-    let snow = mix(ALB.snowA, ALB.snowB, 0.25 + n * 0.5);
-    if (y > 8050) snow = mix(snow, ALB.ice, Math.min(0.35, (y - 8050) / 2400));
-    base = mix(snow, ice, faceAmt);
-  }
+  let snow = mix(ALB.snowA, ALB.snowB, 0.25 + n * 0.5);
+  if (y > 8050) snow = mix(snow, ALB.ice, Math.min(0.35, (y - 8050) / 2400));
+  let base = mix(snow, ice, faceAmt);
+  // The Cwm floor: blinding glacier white. Blended in rather than switched
+  // on, or its edge cuts a serrated line across the valley walls.
+  const cwm = smoothStep(0.28, 0.44, cwmMask(x, z)) * (1 - smoothStep(22, 30, slopeDeg));
+  base = mix(base, ALB.cwm, cwm);
   // Yellow Band: pale limestone cutting across the upper face.
   base = mix(base, mix(ALB.band, ALB.snowA, Math.max(0, (slopeDeg - 48) / 22)), band);
   // Steep ground sheds snow: rock walls.
@@ -525,7 +523,13 @@ export function albedoAt(x: number, z: number, y: number, slopeDeg: number): [nu
   // Geneva Spur: near-black rock rib against the ice.
   const spur =
     Math.max(0, 1 - distToSeg(x, z, 300, 1460, 435, 1290) / 190) * smoothStep(7450, 7620, y);
-  return mix(base, ALB.spur, Math.min(1, spur));
+  base = mix(base, ALB.spur, Math.min(1, spur));
+  // Below the snowline: glacier rubble and moraine. Feathered over 280 m of
+  // altitude — as a hard cut at 5820 m it sawed a serrated horizontal ledge
+  // right across the fluted lower slopes wherever the ribs crossed it.
+  const nearBC = Math.max(0, 1 - Math.hypot(x - WP3.BC[0], z - WP3.BC[2]) / 900);
+  const ground = mix(mix(ALB.moraine, ALB.rubble, n), ALB.rubble, nearBC * 0.5);
+  return mix(base, ground, 1 - smoothStep(5680, 5960, y));
 }
 
 function smoothStep(a: number, b: number, x: number): number {
@@ -563,24 +567,69 @@ export function buildTerrain(): TerrainData {
       const edge = i === 0 || j === 0 || i === nx - 1 || j === nz - 1;
       const h1 = Math.sin(i * 127.1 + j * 311.7) * 43758.5453;
       const h2 = Math.sin(i * 269.5 + j * 183.3) * 28001.8384;
-      const xj = edge ? x : x + (h1 - Math.floor(h1) - 0.5) * 0.45 * dx;
-      const zj = edge ? z : z + (h2 - Math.floor(h2) - 0.5) * 0.45 * dz;
+      const xj = edge ? x : x + (h1 - Math.floor(h1) - 0.5) * 0.12 * dx;
+      const zj = edge ? z : z + (h2 - Math.floor(h2) - 0.5) * 0.12 * dz;
       const y = heightAt(xj, zj);
       positions[k * 3] = xj;
       positions[k * 3 + 1] = y;
       positions[k * 3 + 2] = zj;
       heights[k] = heightAt(x, z);
-      const sx = (heightAt(xj + dx, zj) - heightAt(xj - dx, zj)) / (2 * dx);
-      const sz = (heightAt(xj, zj + dz) - heightAt(xj, zj - dz)) / (2 * dz);
+      // Slope for ALBEDO is measured across a wide baseline, not cell to
+      // cell. Whether ground is rock or snow is a question about the face,
+      // and the face is fluted: ribs are ~200 m apart and swing the local
+      // gradient by ~30°, so any baseline shorter than a rib throws vertex
+      // after vertex onto opposite sides of the rock cutoff and paints every
+      // steep face with a comb of black teeth, one per rib. Lighting still
+      // uses the true per-vertex normal, so the ribs keep all their relief —
+      // they just stop changing the geology.
+      const bx = dx * 16;
+      const bz = dz * 16;
+      const hE = heightAt(xj + bx, zj);
+      const hW = heightAt(xj - bx, zj);
+      const hS = heightAt(xj, zj + bz);
+      const hN = heightAt(xj, zj - bz);
+      const sx = (hE - hW) / (2 * bx);
+      const sz = (hS - hN) / (2 * bz);
       const slope = (Math.atan(Math.hypot(sx, sz)) * 180) / Math.PI;
-      const [r, g, b] = albedoAt(xj, zj, y, slope);
+      // How much this vertex stands above its own neighbourhood. A crest is
+      // convex, and a wide baseline laid across one reads the fall on either
+      // side as steepness — which painted a dark rock rim along the top of
+      // every ridge. Snow sits on crests; rock is the wall below them.
+      const crest = smoothStep(25, 150, y - (hE + hW + hS + hN) / 4);
+      const [r, g, b] = albedoAt(xj, zj, y, slope, crest);
       colors[k * 3] = r;
       colors[k * 3 + 1] = g;
       colors[k * 3 + 2] = b;
     }
   }
+  // Soften the albedo across neighbours before AO goes on. Geological
+  // contacts are gradual over tens of metres; a per-vertex decision is not,
+  // and any speckle left in it reads at distance as a rendering fault rather
+  // than as rock. AO is applied after, so relief stays crisp.
+  {
+    const src = colors.slice();
+    for (let pass = 0; pass < 2; pass++) {
+      if (pass === 1) src.set(colors);
+      for (let j = 1; j < nz - 1; j++) {
+        for (let i = 1; i < nx - 1; i++) {
+          const k = j * nx + i;
+          for (let c = 0; c < 3; c++) {
+            const mid = src[k * 3 + c];
+            const nb =
+              src[(k - 1) * 3 + c] + src[(k + 1) * 3 + c] +
+              src[(k - nx) * 3 + c] + src[(k + nx) * 3 + c];
+            colors[k * 3 + c] = mid * 0.44 + nb * 0.14;
+          }
+        }
+      }
+    }
+  }
   // Baked ambient occlusion: concavities sit below their neighborhood and
   // catch less sky — darkening them gives the relief real depth for free.
+  // Computed into its own field and blurred before it is applied: measured
+  // per vertex on fluted ground it combs along the ribs exactly the way the
+  // albedo did, and re-speckles the surface the blur above just cleaned.
+  const ao = new Float32Array(nx * nz);
   for (let j = 0; j < nz; j++) {
     for (let i = 0; i < nx; i++) {
       const k = j * nx + i;
@@ -593,13 +642,28 @@ export function buildTerrain(): TerrainData {
         sum += heights[jj * nx + ii];
         cnt++;
       }
-      if (!cnt) continue;
-      const occ = Math.max(0, Math.min(1, (sum / cnt - heights[k]) / 130));
-      const f = 1 - occ * 0.28;
-      colors[k * 3] *= f;
-      colors[k * 3 + 1] *= f;
-      colors[k * 3 + 2] *= f;
+      ao[k] = cnt ? Math.max(0, Math.min(1, (sum / cnt - heights[k]) / 130)) : 0;
     }
+  }
+  {
+    const src = new Float32Array(ao.length);
+    for (let pass = 0; pass < 2; pass++) {
+      src.set(ao);
+      for (let j = 1; j < nz - 1; j++) {
+        for (let i = 1; i < nx - 1; i++) {
+          const k = j * nx + i;
+          ao[k] =
+            src[k] * 0.44 +
+            (src[k - 1] + src[k + 1] + src[k - nx] + src[k + nx]) * 0.14;
+        }
+      }
+    }
+  }
+  for (let k = 0; k < nx * nz; k++) {
+    const f = 1 - ao[k] * 0.28;
+    colors[k * 3] *= f;
+    colors[k * 3 + 1] *= f;
+    colors[k * 3 + 2] *= f;
   }
   const indices = new Uint32Array((nx - 1) * (nz - 1) * 6);
   let q = 0;
@@ -709,10 +773,21 @@ export function farHeightAt(x: number, z: number): number {
   const cx = Math.min(Math.max(x, GRID.x0), GRID.x1);
   const cz = Math.min(Math.max(z, GRID.z0), GRID.z1);
   const dOut = Math.hypot(x - cx, z - cz);
-  // Inside the hero rectangle the far mesh simply mirrors the hero surface
-  // a few metres below it. Diving to a flat floor instead left the boundary
-  // triangles standing as a cliff — the plinth the massif appeared to sit on.
-  if (dOut < 1e-6) return heightAt(x, z) - 8;
+  // Inside the hero rectangle the far mesh follows the hero surface at the
+  // boundary — anything else leaves the edge triangles standing as a cliff,
+  // the plinth the massif appeared to sit on — then dives away beneath it.
+  //
+  // The dive is what makes it safe. This mesh samples every ~240 m where the
+  // hero grid samples every ~15 m, so on fluted ridges it cuts straight
+  // across gullies the hero surface actually carves; tucked a token 8 m under,
+  // its dark rock stabbed up through every ridge line as a row of black
+  // sawteeth. Sinking it far below within one cell of the boundary buries the
+  // error under the hero mesh, and buildFarRange drops the interior entirely.
+  if (dOut < 1e-6) {
+    const dIn = Math.min(x - GRID.x0, GRID.x1 - x, z - GRID.z0, GRID.z1 - z);
+    const s = Math.min(1, Math.max(0, dIn / 700));
+    return heightAt(x, z) - 30 - 900 * (s * s * (3 - 2 * s));
+  }
   // Ridged noise: fold value noise into sharp crests, two octaves, with
   // the domain skewed so ranges run with the Himalaya's grain.
   const sx = x * 0.82 + z * 0.42;
@@ -740,8 +815,9 @@ export function farHeightAt(x: number, z: number): number {
   // the transition is a 4 km apron instead: the massif's outwash plain
   // running down into the valley system, which is what is actually there.
   const t = Math.min(1, dOut / 4000);
-  // Tucked a hair under the hero mesh so the two never z-fight at the seam.
-  const edgeH = heightAt(cx, cz) - 8;
+  // Tucked under the hero mesh so the two never z-fight at the seam. 30 m is
+  // invisible across a 4 km apron and clears the coarse mesh's sampling error.
+  const edgeH = heightAt(cx, cz) - 30;
   return edgeH * (1 - t) + h * (t * t * (3 - 2 * t));
 }
 
@@ -779,7 +855,14 @@ export function buildFarRange(): FarRangeData {
       const x = fx0 + i * dx;
       const z = fz0 + j * dz;
       const k = j * nx + i;
-      const edge = i === 0 || j === 0 || i === nx - 1 || j === nz - 1;
+      // Jitter breaks up the grid's regularity, but not at the outer rim (it
+      // would tear the horizon) and not near the hero rectangle, where a
+      // 195 m nudge would drag seam vertices across the boundary and buckle
+      // the join.
+      const nearHero =
+        x > GRID.x0 - dx * 1.5 && x < GRID.x1 + dx * 1.5 &&
+        z > GRID.z0 - dz * 1.5 && z < GRID.z1 + dz * 1.5;
+      const edge = i === 0 || j === 0 || i === nx - 1 || j === nz - 1 || nearHero;
       const h1 = Math.sin(i * 127.1 + j * 311.7) * 43758.5453;
       const h2 = Math.sin(i * 269.5 + j * 183.3) * 28001.8384;
       const xj = edge ? x : x + (h1 - Math.floor(h1) - 0.5) * 0.8 * dx;
@@ -819,19 +902,28 @@ export function buildFarRange(): FarRangeData {
       colors[k * 3 + 2] *= f;
     }
   }
-  const indices = new Uint32Array((nx - 1) * (nz - 1) * 6);
-  let q = 0;
+  // Cut a hole where the hero terrain lives. The far range is a SURROUND, not
+  // a second copy of the mountain: any triangle it draws inside the hero
+  // rectangle is a coarse guess at a surface already drawn properly, and it
+  // only ever shows up as an artefact poking through. One straddling ring is
+  // kept so the two meshes still meet with no gap at the seam.
+  const inside = (k: number) => {
+    const x = positions[k * 3];
+    const z = positions[k * 3 + 2];
+    return x > GRID.x0 && x < GRID.x1 && z > GRID.z0 && z < GRID.z1;
+  };
+  const tris: number[] = [];
   for (let j = 0; j < nz - 1; j++) {
     for (let i = 0; i < nx - 1; i++) {
       const a = j * nx + i;
       const b = a + 1;
       const c = a + nx;
       const d = c + 1;
-      indices[q++] = a; indices[q++] = c; indices[q++] = b;
-      indices[q++] = b; indices[q++] = c; indices[q++] = d;
+      if (inside(a) && inside(b) && inside(c) && inside(d)) continue;
+      tris.push(a, c, b, b, c, d);
     }
   }
-  return { positions, colors, indices };
+  return { positions, colors, indices: Uint32Array.from(tris) };
 }
 
 /** Deterministic star dome: [x, y, z, size01] on a big sphere. */

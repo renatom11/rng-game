@@ -292,7 +292,12 @@ export function MountainMap3D(props: Props) {
     const moon = new THREE.DirectionalLight('#b9c9e8', 0);
     scene.add(moon);
     scene.add(moon.target);
-    const hemi = new THREE.HemisphereLight('#31507c', '#131a2a', 0.7);
+    // Ground colour is the GLACIER, not dirt. Snow throws a huge amount of
+    // light back up onto the walls above it — the reason shaded faces in
+    // Everest photographs read as cold blue-grey rather than black. Left at a
+    // near-black navy, every shadowed rock face crushed to nothing and its
+    // edge against the lit snow tore into a hard serrated line.
+    const hemi = new THREE.HemisphereLight('#31507c', '#42566f', 0.7);
     scene.add(hemi);
     const amb = new THREE.AmbientLight('#1a2440', 0.25);
     scene.add(amb);
@@ -356,10 +361,15 @@ float tnoise(vec2 p){
 {
   float steep = 1.0 - abs(normal.y);
   vec2 pSnow = vec2(vWPos.x * 0.020, vWPos.z * 0.052);
-  vec2 pRock = vec2(vWPos.x * 0.060, vWPos.y * 0.045);
+  vec2 pRock = vec2(vWPos.x * 0.024, vWPos.y * 0.019);
   float nS = tnoise(pSnow) + 0.5 * tnoise(pSnow * 2.7 + 13.1) + 0.28 * tnoise(pSnow * 6.1 + 31.7);
   float nR = tnoise(pRock) + 0.5 * tnoise(pRock * 3.1 + 7.7);
-  float amt = mix(0.26, 0.5, steep);
+  // Micro-relief must MODULATE the shading, not swing it. At mix(0.26, 0.5)
+  // this tilted the normal by up to ~27 degrees at a 16 m period, and did it
+  // hardest on steep ground — so along every ridge, where the face turns away
+  // from the sun, fragments flipped in and out of sunlight and the terminator
+  // grew a band of high-contrast fur.
+  float amt = mix(0.15, 0.2, steep);
   vec2 g = vec2(
     tnoise(pSnow + vec2(0.13, 0.0)) - nS * 0.66,
     tnoise(pSnow + vec2(0.0, 0.13)) - nS * 0.66
