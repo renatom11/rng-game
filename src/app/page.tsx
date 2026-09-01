@@ -10,15 +10,7 @@ const DEMO_EVEREST = [
   'The Icefall Guys', 'Peak Performance', 'Oxygen Debt', 'Cornice Riders',
 ];
 
-const DEMO_OLYMPICS = [
-  'Norwegia', 'Atlantis', 'Kingdom of Zeal', 'Freedonia',
-  'Wakanda', 'Genovia', 'Latveria', 'Elbonia',
-];
 
-const DEMO_SPACE = [
-  'Ad Astra Per Pizza', 'The Von Braunies', 'Red Dirt Racing', 'Escape Velocity',
-  'Major Tomfoolery', 'The Oxidizers', 'Slingshot Society', 'Crimson Horizon',
-];
 
 export default function Home() {
   const router = useRouter();
@@ -26,24 +18,14 @@ export default function Home() {
   // The mountain at alpenglow — the race's most beautiful hour, held still.
   const heroLight = useMemo(() => sceneLight(0.8, 0), []);
 
-  const watchDemo = async (theme: 'everest' | 'olympics' | 'space') => {
+  const watchDemo = async (theme: 'everest') => {
     setBusy(theme);
     try {
       const { createRaceFromBrowser } = await import('@/lib/clientGen');
       const result = await createRaceFromBrowser({
         theme,
-        title:
-          theme === 'olympics'
-            ? 'Demo Games'
-            : theme === 'space'
-              ? 'Demo Mars Run'
-              : 'Demo Expedition',
-        teams: (theme === 'olympics'
-          ? DEMO_OLYMPICS
-          : theme === 'space'
-            ? DEMO_SPACE
-            : DEMO_EVEREST
-        ).map((name) => ({ name })),
+        title: 'Demo Expedition',
+        teams: DEMO_EVEREST.map((name) => ({ name })),
         durationMs: 600_000,
         demo: true,
       });

@@ -10,11 +10,11 @@ export const metadata: Metadata = {
     template: '%s · Summit',
   },
   description:
-    'Fair random ordering as a cinematic spectacle: race your friends up Everest or through the Olympics over minutes or hours. Provably fair, spoiler-proof, undecided until the end.',
+    'Fair random ordering as a cinematic spectacle: give every name its own Everest expedition, over minutes or hours. Provably fair, spoiler-proof, undecided until the end.',
   openGraph: {
     title: 'Summit',
     description:
-      'A duck race on an epic scale — draft orders and who-goes-first, decided by an Everest expedition or an Olympic Games. Check in any time; the ending stays secret.',
+      'A duck race on an epic scale — draft orders and who-goes-first, decided by an Everest expedition. Check in any time; the ending stays secret.',
     type: 'website',
   },
 };

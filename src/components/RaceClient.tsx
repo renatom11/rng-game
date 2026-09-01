@@ -3,23 +3,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
-import type {
-  EverestSnapshot,
-  JourneySnapshot,
-  OlympicsSnapshot,
-  SpaceSnapshot,
-} from '@/lib/slice';
-
-type AnyJourneySnapshot = EverestSnapshot | SpaceSnapshot;
+import type { EverestSnapshot, JourneySnapshot } from '@/lib/slice';
 import { heightOrderAt } from '@/lib/client/raceState';
 import { TEAM_PALETTE } from '@/themes/everest/names';
 import { EVEREST_JOURNEY, type JourneyTheme } from '@/lib/client/journeyTheme';
-import { SPACE_JOURNEY } from '@/lib/client/spaceTheme';
-import { olyPhaseLabel, olyStandingsAt } from '@/lib/client/olympicsState';
 import { useRaceData } from './useRaceData';
 import { useRaceClock } from './useRaceClock';
 import { MountainMap } from './MountainMap';
-import { SpaceMap } from './SpaceMap';
 import { Standings } from './Standings';
 import { CommentaryFeed } from './CommentaryFeed';
 import { PositionChart } from './PositionChart';
@@ -32,9 +22,6 @@ import { RecoveryCodeBanner } from './RecoveryCodeBanner';
 import { ResultsRecap } from './ResultsRecap';
 import { VerifyFairness } from './VerifyFairness';
 import type { Theme } from '@/lib/races';
-import { MedalTable } from './olympics/MedalTable';
-import { LiveEventBoard } from './olympics/LiveEventBoard';
-import { OlympicsResults } from './olympics/OlympicsResults';
 
 export function RaceClient({ slug }: { slug: string }) {
   const { view, error, offsetMs, refresh } = useRaceData(slug);
@@ -165,22 +152,13 @@ export function RaceClient({ slug }: { slug: string }) {
         />
       ) : showRecap ? (
         <>
-          {snap.theme === 'olympics' ? (
-            <OlympicsResults
-              snap={snap}
-              teamNames={teamNames}
-              title={view.config.title}
-              onReplay={onReplay}
-            />
-          ) : (
-            <ResultsRecap
-              snap={snap}
-              jt={journeyThemeFor(snap.theme)}
-              teamNames={teamNames}
-              title={view.config.title}
-              onReplay={onReplay}
-            />
-          )}
+          <ResultsRecap
+            snap={snap}
+            jt={journeyThemeFor(snap.theme)}
+            teamNames={teamNames}
+            title={view.config.title}
+            onReplay={onReplay}
+          />
           <VerifyFairness
             slug={slug}
             theme={view.config.theme as Theme}
@@ -188,18 +166,6 @@ export function RaceClient({ slug }: { slug: string }) {
             durationMs={durationMs}
           />
         </>
-      ) : snap.theme === 'olympics' ? (
-        <OlympicsView
-          snap={snap}
-          title={view.config.title}
-          teamNames={teamNames}
-          tMs={tMs}
-          durationMs={durationMs}
-          demo={demo}
-          finale={finale}
-          selected={selected}
-          setSelected={setSelected}
-        />
       ) : (
         <JourneyView
           snap={snap}
@@ -220,11 +186,7 @@ export function RaceClient({ slug }: { slug: string }) {
           tMs={tMs}
           durationMs={durationMs}
           pushStartMs={snap.pushStartMs}
-          finaleLabel={
-            snap.theme === 'olympics'
-              ? 'Closing marquee'
-              : journeyThemeFor(snap.theme).finaleJumpLabel
-          }
+          finaleLabel={journeyThemeFor(snap.theme).finaleJumpLabel}
           playing={clock.playback.playing}
           speed={clock.playback.speed}
           setPlaying={clock.setPlaying}
@@ -250,7 +212,8 @@ interface ViewProps<S> {
 
 /** Resolve the client vocabulary for a journey theme id. */
 function journeyThemeFor(theme: string): JourneyTheme {
-  return theme === 'space' ? SPACE_JOURNEY : EVEREST_JOURNEY;
+  void theme;
+  return EVEREST_JOURNEY;
 }
 
 /** The map component contract every journey theme's map satisfies. */
@@ -265,20 +228,20 @@ export interface JourneyMapProps {
 }
 
 // The 3D massif ships as its own client-only chunk: three.js never loads
-// for the space theme, for SSR, or before the race view mounts.
+// for SSR, for the flat map, or before the race view mounts.
 const MountainMap3D = dynamic(
   () => import('./MountainMap3D').then((m) => m.MountainMap3D),
   { ssr: false, loading: () => <div className="m3d-wrap m3d-loading">Surveying the mountain…</div> },
 );
 
 function journeyMapFor(theme: string, flat: boolean): React.ComponentType<JourneyMapProps> {
-  if (theme === 'space') return SpaceMap;
+  void theme;
   return flat ? MountainMap : (MountainMap3D as React.ComponentType<JourneyMapProps>);
 }
 
 function JourneyView({
   snap, jt, title, teamNames, tMs, durationMs, demo, finale, selected, setSelected,
-}: ViewProps<AnyJourneySnapshot> & { jt: JourneyTheme }) {
+}: ViewProps<EverestSnapshot> & { jt: JourneyTheme }) {
   // 3D is the default stage; the painted profile stays one tap away.
   const [flatMap, setFlatMap] = useState(false);
   const MapComponent = journeyMapFor(snap.theme, flatMap);
@@ -311,7 +274,7 @@ function JourneyView({
             onSelect={setSelected}
             finale={finale}
           />
-          {snap.theme !== 'space' && (
+          {(
             <button
               className="m3d-dim-toggle"
               onClick={() => setFlatMap((f) => !f)}
@@ -365,69 +328,6 @@ function JourneyView({
           />
         </div>
       )}
-    </>
-  );
-}
-
-function OlympicsView({
-  snap, title, teamNames, tMs, durationMs, demo, finale, selected, setSelected,
-}: ViewProps<OlympicsSnapshot>) {
-  const n = teamNames.length;
-  const orderAt = useCallback(
-    (t: number) => olyStandingsAt(snap, n, t),
-    [snap, n],
-  );
-
-  return (
-    <>
-      <header className="race-header">
-        <h1 className="race-title-sm">{title}</h1>
-        <PhaseBanner
-          tMs={tMs}
-          durationMs={durationMs}
-          demo={demo}
-          label={olyPhaseLabel(tMs, durationMs)}
-        />
-      </header>
-
-      <div className="race-grid">
-        <section className="oly-pane">
-          <LiveEventBoard
-            snap={snap}
-            teamNames={teamNames}
-            tMs={tMs}
-            selected={selected}
-            onSelect={setSelected}
-            finale={finale}
-          />
-        </section>
-        <aside className="side-pane">
-          <MedalTable
-            snap={snap}
-            teamNames={teamNames}
-            tMs={tMs}
-            selected={selected}
-            onSelect={setSelected}
-          />
-        </aside>
-      </div>
-
-      <div className="race-lower">
-        <CommentaryFeed
-          events={snap.events}
-          colors={snap.colors}
-          tMs={tMs}
-          teamNames={teamNames}
-        />
-        <PositionChart
-          orderAt={orderAt}
-          colors={snap.colors}
-          teamNames={teamNames}
-          tMs={tMs}
-          selected={selected}
-          onSelect={setSelected}
-        />
-      </div>
     </>
   );
 }

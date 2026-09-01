@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import { generateEverest } from '@/themes/everest/generate';
-import { generateOlympics } from '@/themes/olympics/generate';
 import {
   boundariesFor,
   buildChunks,
@@ -9,7 +8,7 @@ import {
   serializeUpload,
   validateChunkWindows,
 } from '@/lib/chunking';
-import { toJourneyWindow, toOlympicsWindow, type PublicSnapshot } from '@/lib/slice';
+import { toJourneyWindow, type PublicSnapshot } from '@/lib/slice';
 import { mergeSnapshot } from '@/lib/client/mergeSnapshot';
 
 function teams(n: number) {
@@ -45,22 +44,6 @@ describe('chunk protocol', () => {
         );
       }
     }
-  });
-
-  it('olympics: same property', () => {
-    const dur = 600_000;
-    const tl = generateOlympics('chunk-oly-1', { teams: teams(6), durationMs: dur });
-    const { chunks } = buildChunks('olympics', tl, dur);
-    let merged: PublicSnapshot | null = null;
-    for (let i = 0; i < chunks.length; i++) {
-      const snap = JSON.parse(chunks[i].body) as PublicSnapshot;
-      merged = merged === null ? snap : (mergeSnapshot(merged, snap) as PublicSnapshot);
-      expect(merged).not.toBeNull();
-    }
-    const direct = toOlympicsWindow(tl, -1, dur);
-    expect(JSON.parse(JSON.stringify(merged))).toEqual(
-      JSON.parse(JSON.stringify(direct)),
-    );
   });
 
   it('no chunk body ever contains the finals', () => {

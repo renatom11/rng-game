@@ -9,7 +9,8 @@ import type { Style } from '@/themes/everest/types';
  * chunk strings, and slices by the clock.
  */
 
-export type Theme = 'everest' | 'olympics' | 'space';
+/** Summit is the mountain. The Olympics and Mars Run formats are retired. */
+export type Theme = 'everest';
 
 export interface CreateRaceInput {
   title?: string;
@@ -77,17 +78,11 @@ export function validateCreateInput(
   if (startAtMs > nowMs + 30 * 24 * 3_600_000) throw new ValidationError('start time is too far out');
 
   const theme: Theme = input.theme ?? 'everest';
-  if (theme !== 'everest' && theme !== 'olympics' && theme !== 'space') {
-    throw new ValidationError('theme must be everest, olympics, or space');
+  if (theme !== 'everest') {
+    throw new ValidationError('theme must be everest');
   }
 
-  const title =
-    String(input.title ?? '').trim().slice(0, 80) ||
-    (theme === 'olympics'
-      ? 'The Games'
-      : theme === 'space'
-        ? 'The Mars Run'
-        : 'The Expedition');
+  const title = String(input.title ?? '').trim().slice(0, 80) || 'The Expedition';
 
   return {
     config: { title, theme, teams, demo },

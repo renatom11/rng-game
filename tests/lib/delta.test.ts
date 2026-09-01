@@ -1,9 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { generateEverest } from '@/themes/everest/generate';
-import { generateOlympics } from '@/themes/olympics/generate';
 import {
   toEverestSnapshot,
-  toOlympicsSnapshot,
   horizonFor,
 } from '@/lib/slice';
 import { mergeSnapshot } from '@/lib/client/mergeSnapshot';
@@ -22,7 +20,6 @@ function teams(n: number) {
 
 describe('delta snapshots', () => {
   const everest = generateEverest('delta-ev', { teams: teams(7), durationMs: DUR });
-  const olympics = generateOlympics('delta-oly', { teams: teams(7), durationMs: DUR });
   const pushStart = everest.core.pushStartMs;
 
   const PAIRS: [number, number][] = [
@@ -39,20 +36,6 @@ describe('delta snapshots', () => {
       const full1 = toEverestSnapshot(everest, e1, { complete: false });
       const full2 = toEverestSnapshot(everest, e2, { complete: false });
       const delta = toEverestSnapshot(everest, e2, {
-        complete: false,
-        sinceMs: full1.horizonMs,
-      });
-      const merged = mergeSnapshot(full1, delta);
-      expect(merged).not.toBeNull();
-      expect(merged).toEqual(full2);
-    }
-  });
-
-  it('olympics: full(t2) === merge(full(t1), delta(t1→t2))', () => {
-    for (const [e1, e2] of PAIRS) {
-      const full1 = toOlympicsSnapshot(olympics, e1, { complete: false });
-      const full2 = toOlympicsSnapshot(olympics, e2, { complete: false });
-      const delta = toOlympicsSnapshot(olympics, e2, {
         complete: false,
         sinceMs: full1.horizonMs,
       });
@@ -80,11 +63,6 @@ describe('delta snapshots', () => {
       expect(t).toBeLessThanOrEqual(delta.horizonMs);
     }
     expect(JSON.stringify(delta)).not.toContain('"finalOrder"');
-
-    const oDelta = toOlympicsSnapshot(olympics, e2, { complete: false, sinceMs: since });
-    expect(oDelta.athletes).toHaveLength(0);
-    expect(oDelta.schedule).toHaveLength(0);
-    expect(JSON.stringify(oDelta)).not.toContain('"finalOrder"');
   });
 
   it('a cursor beyond the horizon falls back to a full snapshot', () => {
