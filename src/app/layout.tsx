@@ -1,4 +1,7 @@
 import type { Metadata } from 'next';
+import '@fontsource-variable/fraunces';
+import '@fontsource-variable/schibsted-grotesk';
+import '@fontsource-variable/martian-mono';
 import './globals.css';
 
 export const metadata: Metadata = {
