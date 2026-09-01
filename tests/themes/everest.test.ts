@@ -139,6 +139,51 @@ describe('everest theme', () => {
     }
   });
 
+  it('the meters shown to players sweep and oscillate — no stagnant bars', () => {
+    // The bars are the squad's story. Two ways to be useless: sit in a
+    // narrow band all race (what o2, food and readiness used to do), or
+    // slide one way to the floor and stay there. So assert BOTH a wide
+    // span and genuine two-way movement — a monotone collapse has a large
+    // span but almost no rise, and fails here.
+    const OSC = { o2: 0, food: 2, energy: 4, readiness: 7 };
+    const collect = (m: number) => {
+      const spans: number[] = [], rises: number[] = [], falls: number[] = [], pins: number[] = [];
+      for (const t of runs.slice(0, 12)) {
+        const wiped = new Set(t.wipeouts.map((w) => w.teamIdx));
+        for (let team = 0; team < N; team++) {
+          if (wiped.has(team)) continue;
+          const row = t.meters.values[team][m];
+          let up = 0, down = 0;
+          for (let i = 1; i < row.length; i++) {
+            const d = row[i] - row[i - 1];
+            if (d > 0) up += d;
+            else down -= d;
+          }
+          const lo = Math.min(...row);
+          spans.push(Math.max(...row) - lo);
+          rises.push(up);
+          falls.push(down);
+          pins.push(row.filter((v) => v <= lo + 3).length / row.length);
+        }
+      }
+      // Judge the 10th-percentile team, not the single unluckiest one: a
+      // lone squad that starves high all race is a story, systemic
+      // flatness is the bug this guards against.
+      const lowQ = (a: number[]) => [...a].sort((x, y) => x - y)[Math.floor(a.length * 0.1)];
+      const highQ = (a: number[]) => [...a].sort((x, y) => x - y)[Math.floor(a.length * 0.9)];
+      return { span: lowQ(spans), rise: lowQ(rises), fall: lowQ(falls), pinned: highQ(pins) };
+    };
+    for (const [name, m] of Object.entries(OSC)) {
+      const r = collect(m);
+      expect(r.span, `${name} must sweep a wide range`).toBeGreaterThan(45);
+      expect(r.rise, `${name} must recover, not just drain`).toBeGreaterThan(40);
+      expect(r.fall, `${name} must actually deplete`).toBeGreaterThan(70);
+      expect(r.pinned, `${name} must not sit at its floor all race`).toBeLessThan(0.6);
+    }
+    // Acclimatization is meant to be a one-way climb, but must still travel.
+    expect(collect(6).span, 'acclimatization must span a wide range').toBeGreaterThan(45);
+  });
+
   it('wipeouts only hit bottom placements, late, before any summit', () => {
     for (const t of runs) {
       const n = t.core.finalOrder.length;

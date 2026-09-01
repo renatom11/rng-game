@@ -53,8 +53,9 @@ export function buildMeters(
     // Slight per-team personality in drain/recovery rates (cosmetic).
     const drainMul = 0.85 + rng() * 0.3;
     const recoverMul = 0.85 + rng() * 0.3;
+    const acclMul = 0.9 + rng() * 0.2;
 
-    let o2 = 96 + rng() * 4;
+    let o2 = 88 + rng() * 10;
     let rope = 90 + rng() * 10;
     let food = 92 + rng() * 8;
     let med = 95 + rng() * 5;
@@ -79,34 +80,54 @@ export function buildMeters(
       const drain = 100 * dtFrac * drainMul;
       const recover = 100 * dtFrac * recoverMul;
 
+      // Supplies are a story, not a status light. Everything below is tuned
+      // so a bar actually SWEEPS: food and gas run down hard between
+      // resupplies and refill visibly at the low camps, and energy tracks
+      // the rotation cycle. (They used to drain a few points a race and sit
+      // pinned near full, which told the viewer nothing.)
+
+      // Food and fuel: eaten every day by everyone, faster when working.
+      food -= drain * (0.75 + (moving ? 2.8 : descending ? 0.9 : 0));
+
+      // Bottled oxygen: burned from the first real altitude — cooking,
+      // medical, sleeping gas — and hard on every climb above the Cwm.
+      if (alt > 5900) {
+        const burn = inPush ? 6.0 : moving ? 3.6 : descending ? 1.2 : 1.7;
+        o2 -= drain * burn * (alt > 7000 ? 2.4 : 1);
+      }
+
       if (moving) {
-        energy -= drain * (0.9 + (alt - 5300) / 3200);
-        food -= drain * 0.55;
-        if (high) o2 -= drain * (inPush ? 1.35 : 1.0);
-        rope -= drain * 0.35;
+        energy -= drain * 2.6 * (0.9 + (alt - 5300) / 3200);
+        rope -= drain * 0.9;
       } else if (descending) {
-        energy -= drain * 0.45;
-        food -= drain * 0.45;
+        energy -= drain * 1.2;
       } else {
-        // resting
-        energy += recover * (alt < 6200 ? 1.6 : alt < 7200 ? 0.9 : 0.25);
-        if (!inPush && routeFns.canRestockAt(pos) && (o2 < 80 || food < 75)) {
-          // resupply at Camp II or below
-          o2 = Math.min(100, o2 + recover * 4);
-          food = Math.min(100, food + recover * 4);
-          rope = Math.min(100, rope + recover * 2.5);
+        // Resting. Recovery is dramatically better in thick air — which is
+        // exactly why squads keep going back down.
+        energy += recover * (alt < 6200 ? 6.5 : alt < 7200 ? 3.6 : 1.0);
+        // Resupply: porters reach the low camps freely, the high camps
+        // barely, and nothing crosses the Col once the push is on. Without
+        // the partial high-camp stock a squad that stays up top simply
+        // starved to the floor and sat there for half the race.
+        const stock = alt <= 6400 ? 1 : alt <= 7300 ? 0.62 : 0;
+        if (!inPush && stock > 0) {
+          o2 = Math.min(100, o2 + recover * 12 * stock);
+          food = Math.min(100, food + recover * 14 * stock);
+          rope = Math.min(100, rope + recover * 5 * stock);
+          med = Math.min(100, med + recover * 3 * stock);
         }
       }
 
-      // Acclimatization: time spent high builds it; can't exceed a curve
-      // that matures around the weather window.
+      // Acclimatization: time spent high builds it, against a maturing cap.
+      // The cap gets a per-team tilt so the field doesn't all pin to one
+      // identical curve late in the race.
       if (alt > 5800) accl += 100 * dtFrac * (1.15 + (alt > 6400 ? 0.5 : 0));
-      const acclCap = Math.min(100, 25 + 90 * (t / (pushStartMs || 1)));
+      const acclCap = Math.min(100, (25 + 90 * (t / (pushStartMs || 1))) * acclMul);
       accl = Math.min(accl, acclCap);
 
-      // Morale drifts toward baseline; altitude grinds it, summits (later,
-      // via event nudges) lift it.
-      morale += (62 - morale) * 0.04 + (high ? -0.25 : 0.15) * (dtFrac * 100);
+      // Morale drifts toward baseline, but slowly enough that event nudges
+      // (a camp made, a climber lost) stay legible for a while.
+      morale += (62 - morale) * 0.02 + (high ? -0.5 : 0.35) * (dtFrac * 100);
 
       // Gentle noise so bars breathe.
       const wiggle = () => (rng() * 2 - 1) * 0.6;
@@ -118,10 +139,10 @@ export function buildMeters(
       rope = clamp(rope + wiggle() * 0.4);
       accl = clamp(accl);
 
-      // Floors: the story never shows a team at literally zero unless wiped.
-      o2 = Math.max(o2, inPush ? 12 : 25);
-      energy = Math.max(energy, 15);
-      food = Math.max(food, 18);
+      // Floors exist only so a living squad never reads as literally zero.
+      o2 = Math.max(o2, inPush ? 3 : 8);
+      energy = Math.max(energy, 8);
+      food = Math.max(food, 5);
 
       rows[O2].push(Math.round(o2));
       rows[ROPE].push(Math.round(rope));
@@ -159,20 +180,27 @@ export function recomputeReadiness(values: number[][][]): void {
       }
     }
     for (let i = 0; i < rows[O2].length; i++) {
-      // Energy dominates on purpose: it is the one meter that visibly
-      // drains climbing and refills at rest, so readiness now SWINGS with
-      // the rotation story instead of hovering — a squad down at Base Camp
-      // is watchably recharging for the next push. (The old blend weighted
-      // three near-constant meters at 0.7 combined, which pinned the number
-      // to a lifeless 65-75 band all race.)
-      rows[READY][i] = Math.round(
-        clamp(
-          0.55 * rows[ENERGY][i] +
-            0.2 * rows[ACCL][i] +
-            0.15 * rows[O2][i] +
-            0.1 * rows[MORALE][i],
-        ),
-      );
+      // Readiness answers one question: could this squad leave for the top
+      // right now? So it is dragged down by whatever they are shortest of
+      // (an expedition with no gas is not "70% ready"), then stretched for
+      // contrast so the bar uses its whole range instead of hugging the
+      // middle the way any average of several signals does.
+      const e = rows[ENERGY][i];
+      const o = rows[O2][i];
+      const f = rows[FOOD][i];
+      const a = rows[ACCL][i];
+      const blend = 0.38 * e + 0.24 * o + 0.14 * f + 0.24 * a;
+      const weakest = Math.min(e, o, f);
+      const limited = 0.62 * blend + 0.38 * weakest;
+      rows[READY][i] = Math.round(clamp(50 + (limited - 50) * 1.5));
+    }
+    // The contrast stretch multiplies input jumps too, so smooth readiness
+    // last: bars must always slide rather than snap, however hard an event
+    // nudge hits the meters underneath.
+    for (let i = 1; i < rows[READY].length; i++) {
+      const d = rows[READY][i] - rows[READY][i - 1];
+      if (d > 20) rows[READY][i] = rows[READY][i - 1] + 20;
+      else if (d < -20) rows[READY][i] = rows[READY][i - 1] - 20;
     }
   }
 }

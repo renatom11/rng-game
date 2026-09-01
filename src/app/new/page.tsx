@@ -23,12 +23,12 @@ const DURATIONS: [string, number][] = [
 
 export default function NewRacePage() {
   const router = useRouter();
-  const [theme, setTheme] = useState<'everest' | 'olympics' | 'space'>('everest');
   const [title, setTitle] = useState('');
   const [teams, setTeams] = useState<TeamRow[]>(
-    // Twelve rows out of the box — the size of a standard draft — and any
-    // left blank are simply dropped on submit.
-    Array.from({ length: 12 }, () => ({ name: '', style: '' as Style })),
+    // Twelve rows, pre-named, so "create a race" needs no typing at all —
+    // overwrite the ones you care about, delete the rest. Blank rows are
+    // dropped on submit.
+    Array.from({ length: 12 }, (_, i) => ({ name: `Team ${i + 1}`, style: '' as Style })),
   );
   const [durationMs, setDurationMs] = useState(3_600_000);
   const [customMin, setCustomMin] = useState('');
@@ -58,7 +58,7 @@ export default function NewRacePage() {
     setBusy(true);
     try {
       const body = {
-        theme,
+        theme: 'everest' as const,
         title: title.trim() || undefined,
         teams: teams
           .filter((t) => t.name.trim())
@@ -94,54 +94,8 @@ export default function NewRacePage() {
         (including the site) can see the ending before it happens.
       </p>
 
-      <div className="field">
-        <span>Theme</span>
-        <div className="theme-grid">
-          <button
-            className={`theme-card${theme === 'everest' ? ' active' : ''}`}
-            onClick={() => setTheme('everest')}
-            type="button"
-          >
-            <span className="theme-card-title">🏔 Everest Expedition</span>
-            <span className="theme-card-desc">
-              Squads climb the mountain: rotations, storms, oxygen, risky
-              routes, a summit-push finale. First to the top wins.
-            </span>
-          </button>
-          <button
-            className={`theme-card${theme === 'olympics' ? ' active' : ''}`}
-            onClick={() => setTheme('olympics')}
-            type="button"
-          >
-            <span className="theme-card-title">🏅 The Games</span>
-            <span className="theme-card-desc">
-              Delegations battle across a full Olympic programme: live events,
-              medal table, and a closing marquee that decides gold.
-            </span>
-          </button>
-          <button
-            className={`theme-card${theme === 'space' ? ' active' : ''}`}
-            onClick={() => setTheme('space')}
-            type="button"
-          >
-            <span className="theme-card-title">🚀 The Mars Run</span>
-            <span className="theme-card-desc">
-              Crews race across seventy-eight million kilometres: slingshots,
-              solar storms, resupply loops, and a powered-descent finale.
-              First on the red dirt wins.
-            </span>
-          </button>
-        </div>
-      </div>
-
       <label className="field">
-        <span>
-          {theme === 'olympics'
-            ? 'Games name'
-            : theme === 'space'
-              ? 'Mission name'
-              : 'Expedition name'}
-        </span>
+        <span>Expedition name</span>
         <input
           value={title}
           onChange={(e) => setTitle(e.target.value)}
@@ -179,11 +133,8 @@ export default function NewRacePage() {
                 value={t.style}
                 onChange={(e) => setTeam(i, { style: e.target.value as Style })}
                 title="Style flavors the routes they take — it never changes their odds."
-                hidden={theme === 'olympics'}
               >
-                <option value="">
-                  {theme === 'space' ? 'Let the void decide' : 'Let the mountain decide'}
-                </option>
+                <option value="">Let the mountain decide</option>
                 <option value="bold">Bold</option>
                 <option value="balanced">Balanced</option>
                 <option value="cautious">Cautious</option>
@@ -206,12 +157,10 @@ export default function NewRacePage() {
         >
           + Add team
         </button>
-        {theme !== 'olympics' && (
-          <p className="field-hint">
-            Style is pure flavor — bold teams take the risky lines, cautious
-            ones the safe ones. The odds stay exactly equal either way.
-          </p>
-        )}
+        <p className="field-hint">
+          Style is pure flavor — bold teams take the risky lines, cautious
+          ones the safe ones. The odds stay exactly equal either way.
+        </p>
       </div>
 
       <div className="field">
@@ -283,17 +232,7 @@ export default function NewRacePage() {
 
       {err && <p className="form-err">{err}</p>}
       <button className="cta" onClick={submit} disabled={busy}>
-        {busy
-          ? theme === 'olympics'
-            ? 'Lighting the cauldron…'
-            : theme === 'space'
-              ? 'Fueling the boosters…'
-              : 'Consulting the mountain…'
-          : theme === 'olympics'
-            ? 'Open the Games'
-            : theme === 'space'
-              ? 'Launch the mission'
-              : 'Create the expedition'}
+        {busy ? 'Consulting the mountain…' : 'Create the expedition'}
       </button>
     </main>
   );

@@ -56,10 +56,10 @@ export default function Home() {
         <p className="landing-kicker">A very grand way to sort a list</p>
         <h1 className="landing-title">SUMMIT</h1>
         <p className="landing-tag">
-          Draft order. Chore duty. Who goes first. Give every name an Everest
-          expedition, an Olympic delegation, or a Mars-bound crew; race them
-          for anywhere from a minute to a full day, and let the ending decide
-          — provably fair, gloriously dramatic.
+          Draft order. Chore duty. Who goes first. Give every name its own
+          Everest expedition, race them for anywhere from a minute to a full
+          day, and let the mountain decide — provably fair, gloriously
+          dramatic.
         </p>
         <div className="landing-ctas">
           <Link className="cta" href="/new">
