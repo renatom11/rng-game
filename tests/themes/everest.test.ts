@@ -139,6 +139,93 @@ describe('everest theme', () => {
     }
   });
 
+  it('a camp once reached is a floor for the rest of the climb', () => {
+    // Real expeditions do walk all the way back to Base Camp between
+    // rotations, but on screen a squad sliding below a camp it already stood
+    // in — three quarters of the way into the race — reads as losing progress
+    // rather than as resting.
+    for (const t of runs.slice(0, 24)) {
+      const times = t.displayTrack.tMs;
+      const wiped = new Set(t.wipeouts.map((w) => w.teamIdx));
+      for (let team = 0; team < N; team++) {
+        if (wiped.has(team)) continue;
+        const pos = t.displayTrack.pos[team];
+        let floor = 0;
+        let floorLabel = 'the start';
+        for (let i = 0; i < times.length; i++) {
+          expect(
+            pos[i],
+            `team ${team} reached ${floorLabel} but fell back to ${altitudeAt(pos[i]).toFixed(0)}m at ${(times[i] / 60000).toFixed(1)}min`,
+          ).toBeGreaterThanOrEqual(floor - 1e-6);
+          const node = NODES.filter((nd) => nd.frac <= pos[i] + 1e-9).pop();
+          if (node && node.frac > floor) {
+            floor = node.frac;
+            floorLabel = node.label;
+          }
+        }
+      }
+    }
+  });
+
+  it('readiness is a cause, not a caption — an empty squad stops climbing', () => {
+    // The bar has to MEAN something: a squad with nothing left does not keep
+    // strolling uphill. Two failure modes this guards, both of which reduce
+    // readiness to decoration — behaviour that ignores the number, and a
+    // number so pinned to its floor that ignoring it is the only option.
+    const READY = METER_KEYS.indexOf('readiness');
+    const ROTATION_END = 0.78; // the closing window; see summitBidStartMs
+    let brake = 0, brakeUp = 0, free = 0, freeUp = 0, stop = 0, stopUp = 0;
+    let teamsBraked = 0, teams = 0;
+    const atCol: number[] = [];
+
+    for (const t of runs.slice(0, 24)) {
+      const times = t.displayTrack.tMs;
+      const wiped = new Set(t.wipeouts.map((w) => w.teamIdx));
+      let iCol = 0;
+      while (iCol < times.length - 1 && times[iCol + 1] <= t.core.pushStartMs) iCol++;
+      for (let team = 0; team < N; team++) {
+        if (wiped.has(team)) continue;
+        const pos = t.displayTrack.pos[team];
+        const ready = t.meters.values[team][READY];
+        teams++;
+        atCol.push(ready[iCol]);
+        let dipped = false;
+        for (let i = 1; i < times.length; i++) {
+          if (times[i] / DUR >= ROTATION_END) break; // the field commits regardless
+          // The reading the step was decided on is the one BEFORE it.
+          const r = ready[i - 1];
+          const up = pos[i] - pos[i - 1] > 0.0008;
+          if (r >= 34) { free++; if (up) freeUp++; }
+          else { brake++; if (up) brakeUp++; dipped = true; }
+          if (r < 12) { stop++; if (up) stopUp++; }
+        }
+        if (dipped) teamsBraked++;
+      }
+    }
+
+    // The mechanism has to actually engage on a decent share of the field,
+    // or the assertions below pass vacuously.
+    expect(teamsBraked / teams, 'squads must actually run themselves down').toBeGreaterThan(0.25);
+    expect(stop, 'some squad must reach the floor').toBeGreaterThan(0);
+
+    // And when it engages, it bites: a braked squad gains ground far less
+    // often than a fresh one, and an empty squad essentially never does.
+    const rate = (a: number, b: number) => a / Math.max(1, b);
+    expect(rate(brakeUp, brake), 'a spent squad must climb less than a fresh one')
+      .toBeLessThan(rate(freeUp, free) * 0.8);
+    expect(rate(stopUp, stop), 'an empty squad must not keep strolling uphill')
+      .toBeLessThan(0.1);
+
+    // Nor may the whole field arrive at the Col pinned to the floor — then
+    // the number is meaningless for the entire final act, which is exactly
+    // what it used to do.
+    const sorted = [...atCol].sort((a, b) => a - b);
+    expect(sorted[Math.floor(sorted.length / 2)], 'median squad reaches the Col with something left')
+      .toBeGreaterThan(25);
+    expect(sorted[Math.floor(sorted.length * 0.9)] - sorted[Math.floor(sorted.length * 0.1)],
+      'the field must arrive at the Col in visibly different shape').toBeGreaterThan(20);
+  });
+
   it('the meters shown to players sweep and oscillate — no stagnant bars', () => {
     // The bars are the squad's story. Two ways to be useless: sit in a
     // narrow band all race (what o2, food and readiness used to do), or

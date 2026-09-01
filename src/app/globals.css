@@ -509,7 +509,18 @@ button { font-family: inherit; }
 }
 .standing-main { display: flex; flex-direction: column; min-width: 0; gap: 1px; }
 .standing-name { font-size: 0.92rem; font-weight: 580; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.standing-where { font-size: 0.7rem; color: var(--snow-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Two lines, because the reason a squad is moving is the half that used to
+   get cut off ("Down to Camp I — regrou…" answers nothing). */
+.standing-where {
+  font-size: 0.7rem;
+  color: var(--snow-dim);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  line-height: 1.32;
+}
 .standing-mom { font-size: 0.7rem; color: var(--snow-dim); }
 .standing-mom.up { color: var(--ok); text-shadow: 0 0 8px rgba(107, 208, 150, 0.5); }
 .standing-mom.down { color: var(--danger); }

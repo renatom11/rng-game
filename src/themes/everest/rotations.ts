@@ -39,6 +39,20 @@ const C4_FRAC = nodeById.get('C4')!.frac; // 0.70 in display space
 const COL_APPROACH_U = 0.78; // from here, converge on the hold point
 
 /**
+ * When the closing window opens: rotations are over, and the field starts
+ * moving up to the Col whatever shape it is in. From here the climb is one
+ * continuous summit bid, which is why the meters price it differently.
+ */
+export const summitBidStartMs = (durationMs: number) => COL_APPROACH_U * durationMs;
+
+// Where condition starts and stops braking the climb, on the same 0–100
+// scale the readiness bar shows. Above BRAKE_FULL a squad climbs freely;
+// between the two it drags; at BRAKE_STOP it is done going up until rest
+// buys something back.
+const BRAKE_FULL = 34;
+const BRAKE_STOP = 12;
+
+/**
  * Rest-stop geometry, so another journey theme (space) can reuse the
  * choreography with its own waypoints. `restFracs` are the display fracs a
  * team may drop back to between pushes; `forceShallow` keeps dips small
@@ -149,6 +163,34 @@ export interface StormWindow {
   endMs: number;
 }
 
+/**
+ * How fit a squad is to move, 0..100 — the same readiness the team card
+ * shows, integrated alongside the choreography rather than after it.
+ *
+ * The loop asks `readiness()` before it decides where a team goes next, then
+ * reports the step it settled on. So condition DRIVES the climb instead of
+ * merely recording it: a spent squad sits a storm out, gets turned around,
+ * drops further to recover, and near the floor simply cannot go up until rest
+ * has bought it something back — and because the readings only ever depend on
+ * steps already committed, the bar on screen is the very number that decided
+ * all of it.
+ *
+ * Still pure decoration: it reads meters derived from this display track, and
+ * the finishing order was drawn before any of it existed.
+ */
+export interface LiveCondition {
+  readiness(): number;
+  advance(tMs: number, pos: number): void;
+}
+
+export type ConditionFactory = (team: number) => LiveCondition;
+
+/** A squad lost outright: the mountain keeps them where they fell. */
+export interface Wipeout {
+  teamIdx: number;
+  tMs: number;
+}
+
 export function buildDisplayTrack(
   rng: RNG,
   core: CoreTimeline,
@@ -157,6 +199,8 @@ export function buildDisplayTrack(
   paceEvents: PaceEvent[] = [],
   storms: StormWindow[] = [],
   styles?: Style[],
+  conditionFor?: ConditionFactory,
+  wipeouts: Wipeout[] = [],
 ): { tMs: number[]; pos: number[][]; beats: ChoreoBeat[] } {
   const n = core.grid.p.length;
   const tMs = sparseTimes(durationMs, [core.pushStartMs, ...core.summitTimesMs]);
@@ -200,7 +244,31 @@ export function buildDisplayTrack(
     // like every style effect, shapes only the telling — never the outcome).
     const style = styles?.[team] ?? 'balanced';
     const holdP = style === 'cautious' ? 0.9 : style === 'bold' ? 0.4 : 0.7;
-    const holdStorm = storms.map(() => rng() < holdP);
+    // The squad's live condition. Without one (bare choreography, as the
+    // tests build it) every decision sees an even 55 and behaves as it always
+    // did.
+    const live = conditionFor?.(team);
+    const cond = () => (live ? live.readiness() : 55);
+    const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
+
+    // Every roll is drawn up front, in a fixed order, so the stream stays
+    // deterministic — but the THRESHOLDS each roll is judged against are
+    // evaluated later, at the moment the squad actually has to decide, when
+    // its real condition is known. Decisions are memoized: a call made is a
+    // call made, and second-guessing it mid-storm would read as a flicker.
+    const holdRoll = storms.map(() => rng());
+    const holdCall: (boolean | undefined)[] = storms.map(() => undefined);
+    /**
+     * Sit this storm out, or gamble and climb through it? The spent dig in;
+     * the fresh gamble. Decided when the storm arrives — or earlier, if the
+     * squad is planning a rotation that runs into it.
+     */
+    const holdsStorm = (si: number): boolean => {
+      if (holdCall[si] === undefined) {
+        holdCall[si] = holdRoll[si] < clamp01(holdP + (55 - cond()) / 90);
+      }
+      return holdCall[si];
+    };
     const stormCamp: (number | undefined)[] = storms.map(() => undefined);
     const holdBeaten = storms.map(() => false);
     const pushBeaten = storms.map(() => false);
@@ -209,25 +277,43 @@ export function buildDisplayTrack(
     // force a retreat to the camp it started from? Climbing into a storm
     // makes failure much more likely — the retreat is the price of the
     // gamble the wait-it-out teams refused.
-    const attempts = cycles.map((c) => {
+    const attempts = cycles.map(() => ({
+      failRoll: rng(),
+      peakF: 0.45 + rng() * 0.3,
+      called: false,
+      fail: false,
+      stormy: false,
+      beaten: false,
+      restBeaten: false,
+    }));
+
+    /** Settle this cycle's attempt on the condition the squad sets out in. */
+    const attemptFor = (ci: number) => {
+      const at = attempts[ci];
+      if (at.called) return at;
+      at.called = true;
+      const c = cycles[ci];
       const ascEnd = c.startMs + c.shape[0] * (c.endMs - c.startMs);
-      const stormy = storms.some(
-        (s, si) => !holdStorm[si] && c.startMs < s.endMs && ascEnd > s.startMs,
+      at.stormy = storms.some(
+        (s, si) => c.startMs < s.endMs && ascEnd > s.startMs && !holdsStorm(si),
       );
-      const failRoll = rng();
-      const peakF = 0.45 + rng() * 0.3;
-      const fail = allowFails && failRoll < (stormy ? 0.75 : 0.35);
-      return { fail, stormy, peakF, beaten: false, restBeaten: false };
-    });
+      // A tired squad gets turned around; a strong one gets the height.
+      const base = at.stormy ? 0.75 : 0.35;
+      at.fail = allowFails && at.failRoll < clamp01(base + (55 - cond()) / 110);
+      return at;
+    };
 
     /** The held storm blowing at t, if any (holds beat everything else). */
     const activeHeldStorm = (t: number): number => {
       for (let si = 0; si < storms.length; si++) {
-        if (!holdStorm[si]) continue;
-        if (t >= storms[si].startMs && t <= storms[si].endMs) return si;
+        if (t < storms[si].startMs || t > storms[si].endMs) continue;
+        if (holdsStorm(si)) return si;
       }
       return -1;
     };
+
+    const wipeMs = wipeouts.find((w) => w.teamIdx === team)?.tMs;
+    let wipeFrozen: number | null = null;
 
     const deaths = paceEvents
       .filter((pe) => pe.teamIdx === team && pe.tMs < T_FREE)
@@ -246,6 +332,12 @@ export function buildDisplayTrack(
     };
     const row: number[] = [];
     let lastPos = 0;
+    // A camp, once made, is a floor. Real expeditions do walk all the way
+    // back to Base Camp between rotations, but on screen a team sliding
+    // below a camp it already reached — three quarters of the way into the
+    // race — reads as losing progress rather than resting. So the deepest a
+    // squad ever drops is the highest camp it has stood in.
+    let campFloor = 0;
 
     for (const t of tMs) {
       const u = t / durationMs;
@@ -316,10 +408,12 @@ export function buildDisplayTrack(
             // Dig in at the camp at/below where the storm caught them — or
             // exactly where they stand when the race is too short to repay
             // a descent (the shallow-dip floor exists for a reason).
-            stormCamp[heldSi] =
+            stormCamp[heldSi] = Math.max(
+              Math.min(campFloor, lastPos),
               durationMs < 900_000 || route.forceShallow
                 ? Math.round(lastPos * 1e4) / 1e4
-                : route.restFracs[restIndexBelow(route.restFracs, lastPos + 0.005)];
+                : route.restFracs[restIndexBelow(route.restFracs, lastPos + 0.005)],
+            );
           }
           x = stormCamp[heldSi]!;
           if (!holdBeaten[heldSi]) {
@@ -341,14 +435,21 @@ export function buildDisplayTrack(
           } else {
             const cf = (t - cycle.startMs) / (cycle.endMs - cycle.startMs);
             const [a, dh, d] = cycle.shape;
+            // The worse the shape, the further down they go to fix it.
+            const deeper = cond() < BRAKE_FULL ? 1 : 0;
             const restFrac =
               route.restFracs[
-                Math.max(0, restIndexBelow(route.restFracs, reach) - cycle.restDepth)
+                Math.max(
+                  0,
+                  restIndexBelow(route.restFracs, reach) - cycle.restDepth - deeper,
+                )
               ];
             let low = Math.min(restFrac, reach);
             // Short races / shallow themes: keep rest stops close enough.
             if (durationMs < 900_000 || route.forceShallow) low = Math.max(low, reach - 0.2);
-            const at = attempts[ci];
+            // Never below a camp already made.
+            low = Math.max(low, Math.min(campFloor, reach));
+            const at = attemptFor(ci);
             if (cf < a) {
               const f = cf / a;
               if (!at.fail) {
@@ -403,8 +504,9 @@ export function buildDisplayTrack(
           // retreat.
           for (let si = 0; si < storms.length; si++) {
             const s = storms[si];
-            if (holdStorm[si] || pushBeaten[si]) continue;
+            if (pushBeaten[si]) continue;
             if (t < s.startMs || t > s.endMs) continue;
+            if (holdsStorm(si)) continue;
             if (cleanAscent && x > lastPos + 0.0008) {
               pushBeaten[si] = true;
               beats.push({
@@ -422,9 +524,46 @@ export function buildDisplayTrack(
         const cap = u >= COL_APPROACH_U ? approachCap : normalCap;
         x = Math.max(lastPos - cap, Math.min(lastPos + cap, x));
       }
+      // The floor is absolute, not just a target for the rest dip: the
+      // short-handed pace lag must not walk a team back below a camp it
+      // already stood in either.
+      if (t < core.pushStartMs) x = Math.max(x, campFloor);
+
+      // Rock bottom means rock bottom. A squad with nothing left does not
+      // keep strolling uphill: climbing slows as condition falls and stops
+      // outright at the floor, until rest has bought something back. This is
+      // the whole point of the readiness bar — down there it is not a status
+      // light, it is a brake.
+      //
+      // The brake governs the rotation phase only. Once the summit window
+      // opens the whole field commits, ready or not — that closing window is
+      // the forcing function that gets everyone to the Col, and braking
+      // inside it would strand a squad below C4 with nothing but the push's
+      // catch-up rate to save it.
+      if (u < COL_APPROACH_U && x > lastPos) {
+        const c = cond();
+        if (c < BRAKE_FULL) {
+          const throttle = Math.max(0, (c - BRAKE_STOP) / (BRAKE_FULL - BRAKE_STOP));
+          x = lastPos + (x - lastPos) * throttle;
+        }
+      }
+
+      // A squad lost outright stops here for good — the freeze belongs in the
+      // choreography, not stamped on afterwards, so their meters record a
+      // team that stopped where it fell rather than one still climbing.
+      if (wipeMs !== undefined && t >= wipeMs) {
+        if (wipeFrozen === null) wipeFrozen = lastPos;
+        x = wipeFrozen;
+      }
+
       x = Math.max(0, Math.min(1, x));
       row.push(Math.round(x * 1e4) / 1e4);
       lastPos = row[row.length - 1];
+      live?.advance(t, lastPos);
+      // Standing in a camp raises the floor for every later rest.
+      const madeIdx = restIndexBelow(route.restFracs, lastPos + 1e-9);
+      const made = route.restFracs[madeIdx];
+      if (made > campFloor && lastPos >= made - 1e-9) campFloor = made;
     }
     pos.push(row);
   }

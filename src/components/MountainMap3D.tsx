@@ -292,7 +292,12 @@ export function MountainMap3D(props: Props) {
     const moon = new THREE.DirectionalLight('#b9c9e8', 0);
     scene.add(moon);
     scene.add(moon.target);
-    const hemi = new THREE.HemisphereLight('#31507c', '#131a2a', 0.7);
+    // Ground colour is the GLACIER, not dirt. Snow throws a huge amount of
+    // light back up onto the walls above it — the reason shaded faces in
+    // Everest photographs read as cold blue-grey rather than black. Left at a
+    // near-black navy, every shadowed rock face crushed to nothing and its
+    // edge against the lit snow tore into a hard serrated line.
+    const hemi = new THREE.HemisphereLight('#31507c', '#42566f', 0.7);
     scene.add(hemi);
     const amb = new THREE.AmbientLight('#1a2440', 0.25);
     scene.add(amb);
@@ -356,10 +361,15 @@ float tnoise(vec2 p){
 {
   float steep = 1.0 - abs(normal.y);
   vec2 pSnow = vec2(vWPos.x * 0.020, vWPos.z * 0.052);
-  vec2 pRock = vec2(vWPos.x * 0.060, vWPos.y * 0.045);
+  vec2 pRock = vec2(vWPos.x * 0.024, vWPos.y * 0.019);
   float nS = tnoise(pSnow) + 0.5 * tnoise(pSnow * 2.7 + 13.1) + 0.28 * tnoise(pSnow * 6.1 + 31.7);
   float nR = tnoise(pRock) + 0.5 * tnoise(pRock * 3.1 + 7.7);
-  float amt = mix(0.26, 0.5, steep);
+  // Micro-relief must MODULATE the shading, not swing it. At mix(0.26, 0.5)
+  // this tilted the normal by up to ~27 degrees at a 16 m period, and did it
+  // hardest on steep ground — so along every ridge, where the face turns away
+  // from the sun, fragments flipped in and out of sunlight and the terminator
+  // grew a band of high-contrast fur.
+  float amt = mix(0.15, 0.2, steep);
   vec2 g = vec2(
     tnoise(pSnow + vec2(0.13, 0.0)) - nS * 0.66,
     tnoise(pSnow + vec2(0.0, 0.13)) - nS * 0.66
@@ -1025,16 +1035,19 @@ float tnoise(vec2 p){
       for (let i = 0; i < teamGroups.length; i++) {
         const pos = displayPosAt(p.snap, i, p.tMs);
         let [x, y, z] = posToXYZ(pos);
+        // A team that has topped out leaves the mountain: its light, beam
+        // and tag are removed rather than parked on the summit, where a
+        // growing pile of dots buried the peak it just earned. The summit
+        // label carries the count, and the rail carries the arrival time.
         const parked = pos >= 0.9999;
-        if (parked) {
-          // Down the northwest shoulder in arrival order, feet on snow,
-          // spaced so constant-size chips stay separate even from afar.
-          const k = Math.max(0, summitOrder.indexOf(i));
-          x += -k * 112 - 16;
-          z += -k * 62 - 9;
-          y = heightAt(x, z);
-        }
         const grp = teamGroups[i];
+        grp.visible = !parked;
+        grp.userData.parked = parked;
+        if (parked) {
+          (trailLines[i].material as THREE.LineBasicMaterial).opacity = 0;
+          tagEls[i].style.opacity = '0';
+          continue;
+        }
         grp.position.set(x, y + 26, z);
         grp.userData.parked = parked;
         const st = states[i];
@@ -1139,6 +1152,7 @@ float tnoise(vec2 p){
         // fits the spread — the camera itself is a leaderboard readout.
         let cx = 0, cy = 0, cz = 0, cn = 0;
         for (const g of teamGroups) {
+          if (!g.visible) continue; // summited teams have left the mountain
           cx += g.position.x; cy += g.position.y; cz += g.position.z; cn++;
         }
         if (cn > 0) {
@@ -1186,6 +1200,7 @@ float tnoise(vec2 p){
         const cells = new Set<string>();
         for (let i = 0; i < teamGroups.length; i++) {
           const el = tagEls[i];
+          if (!teamGroups[i].visible) { el.style.opacity = '0'; continue; }
           tmpV.copy(teamGroups[i].position).project(camera);
           const lx = ((tmpV.x + 1) / 2) * wrap.clientWidth;
           const ly = ((-tmpV.y + 1) / 2) * wrap.clientHeight;
@@ -1207,6 +1222,16 @@ float tnoise(vec2 p){
         const [x, y, z] = WP3[l.id];
         tmpV.set(x, y + 30, z).project(camera);
         const el = labelEls[i];
+        // The summit keeps the tally the vanished dots used to carry.
+        if (l.id === 'SUMMIT') {
+          const n = summitOrder.length;
+          const line = n === 0 ? l.alt : `${n} summited`;
+          if (el.dataset.line !== line) {
+            el.dataset.line = line;
+            const altEl = el.querySelector('.m3d-label-alt');
+            if (altEl) altEl.textContent = line;
+          }
+        }
         const behind = tmpV.z > 1;
         const lx = ((tmpV.x + 1) / 2) * wrap.clientWidth;
         const ly = ((-tmpV.y + 1) / 2) * wrap.clientHeight;
