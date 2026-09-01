@@ -519,8 +519,8 @@ export function MountainMap3D(props: Props) {
       hemi.intensity = 0.26 + dayness * 0.85;
       amb.intensity = 0.16 + L.darkness * 0.16;
       // Snow faintly luminous under starlight — the mountain keeps its form.
-      terrainMat.emissive.setScalar(0).lerp(new THREE.Color('#131c30'), L.darkness);
-      moon.intensity = Math.max(moon.intensity, L.darkness * 0.35);
+      terrainMat.emissive.setScalar(0).lerp(new THREE.Color('#1a2540'), L.darkness);
+      moon.intensity = Math.max(moon.intensity, L.darkness * 0.45);
       (scene.fog as THREE.FogExp2).color.set(L.horizon);
       (scene.fog as THREE.FogExp2).density =
         0.000013 + L.haze * 0.000012 + stormNow * 0.00021;
@@ -579,15 +579,18 @@ export function MountainMap3D(props: Props) {
       for (let i = 0; i < teamGroups.length; i++) {
         const pos = displayPosAt(p.snap, i, p.tMs);
         let [x, y, z] = posToXYZ(pos);
-        if (pos >= 0.9999) {
-          // Down the northwest shoulder in arrival order, feet on snow.
+        const parked = pos >= 0.9999;
+        if (parked) {
+          // Down the northwest shoulder in arrival order, feet on snow,
+          // spaced so constant-size chips stay separate even from afar.
           const k = Math.max(0, summitOrder.indexOf(i));
-          x += -k * 52 - 14;
-          z += -k * 30 - 8;
+          x += -k * 112 - 16;
+          z += -k * 62 - 9;
           y = heightAt(x, z);
         }
         const grp = teamGroups[i];
         grp.position.set(x, y + 26, z);
+        grp.userData.parked = parked;
         const st = states[i];
         const wiped = st?.wiped ?? false;
         const visMul = (1 - white) * (wiped ? 0.35 : 1);
@@ -597,7 +600,7 @@ export function MountainMap3D(props: Props) {
         haloMats[i].opacity = visMul * (0.28 + lampAmt * 0.5);
         haloMats[i].color.setStyle(lampAmt > 0.4 ? '#ffdf9e' : '#ffffff');
         const beamM = beamMeshes[i].material as THREE.MeshBasicMaterial;
-        beamM.opacity = visMul * (0.16 + L.darkness * 0.6);
+        beamM.opacity = wiped ? 0 : visMul * (0.12 + L.darkness * 0.42);
         beamMeshes[i].lookAt(camera.position.x, beamMeshes[i].getWorldPosition(tmpV).y, camera.position.z);
         if (!wiped) {
           leadFrac = Math.max(leadFrac, pos);
@@ -611,11 +614,13 @@ export function MountainMap3D(props: Props) {
           grp.userData.trailTick = tick;
           const step = Math.max(6_000, p.durationMs / 1800);
           const pts: THREE.Vector3[] = [];
-          for (let k = 16; k >= 0; k--) {
-            const tp = displayPosAt(p.snap, i, Math.max(0, p.tMs - k * step));
-            if (Math.abs(pos - tp) > 0.04) continue;
-            const [tx, ty, tz] = posToXYZ(tp);
-            pts.push(new THREE.Vector3(tx, ty + 22, tz));
+          if (!parked) {
+            for (let k = 16; k >= 0; k--) {
+              const tp = displayPosAt(p.snap, i, Math.max(0, p.tMs - k * step));
+              if (Math.abs(pos - tp) > 0.04) continue;
+              const [tx, ty, tz] = posToXYZ(tp);
+              pts.push(new THREE.Vector3(tx, ty + 22, tz));
+            }
           }
           if (pts.length >= 2) {
             trailLines[i].geometry.dispose();
@@ -626,6 +631,24 @@ export function MountainMap3D(props: Props) {
         }
       }
       spread = maxF - minF;
+
+      // Fan out co-located climbing markers along the camera's right axis
+      // so a shared camp never becomes one unreadable pile of chips.
+      {
+        const right = tmpV.setFromMatrixColumn(camera.matrixWorld, 0).clone();
+        const buckets = new Map<string, number>();
+        for (const g of teamGroups) {
+          if (g.userData.parked) continue;
+          const key = `${Math.round(g.position.x / 150)}:${Math.round(g.position.y / 150)}:${Math.round(g.position.z / 150)}`;
+          const k = buckets.get(key) ?? 0;
+          buckets.set(key, k + 1);
+          if (k > 0) {
+            const side = k % 2 === 1 ? 1 : -1;
+            const mag = Math.ceil(k / 2) * 58;
+            g.position.addScaledVector(right, side * mag);
+          }
+        }
+      }
 
       // Selection ring.
       if (p.selected !== null && p.selected < teamGroups.length) {
@@ -719,10 +742,15 @@ export function MountainMap3D(props: Props) {
         tmpV.set(x, y + 30, z).project(camera);
         const el = labelEls[i];
         const behind = tmpV.z > 1;
-        const show = !behind && (l.tier === 0 || dist < 5200) && white < 0.7;
+        const lx = ((tmpV.x + 1) / 2) * wrap.clientWidth;
+        const ly = ((-tmpV.y + 1) / 2) * wrap.clientHeight;
+        const inFrame =
+          lx > 46 && lx < wrap.clientWidth - 46 && ly > 40 && ly < wrap.clientHeight - 70;
+        const show =
+          !behind && inFrame && (l.tier === 0 || dist < 5200) && white < 0.7;
         el.style.opacity = show ? String(0.92 - white * 0.9) : '0';
         if (show) {
-          el.style.transform = `translate(-50%, -100%) translate(${((tmpV.x + 1) / 2) * wrap.clientWidth}px, ${((-tmpV.y + 1) / 2) * wrap.clientHeight}px)`;
+          el.style.transform = `translate(-50%, -100%) translate(${lx}px, ${ly}px)`;
         }
       }
 

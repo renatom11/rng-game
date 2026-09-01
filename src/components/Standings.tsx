@@ -87,7 +87,7 @@ export function Standings({ snap, jt, teamNames, tMs, durationMs, selected, onSe
                 ? wp.label
                 : jt.positionLabel(pos);
           const isSel = selected === teamIdx;
-          const arrow = mom[teamIdx] > 0 ? '▲' : mom[teamIdx] < 0 ? '▼' : '·';
+          const arrow = mom[teamIdx] > 0 ? '▲' : mom[teamIdx] < 0 ? '▼' : '';
           return (
             <li key={teamIdx} ref={flipRef(String(teamIdx))}>
               <button
@@ -105,7 +105,9 @@ export function Standings({ snap, jt, teamNames, tMs, durationMs, selected, onSe
                     <span className={`st-ico st-${st.motionKind}`} aria-hidden>
                       {STATE_ICON[st.motionKind]}
                     </span>
-                    {where} · {st.activity}
+                    {st.activity.toLowerCase().includes(where.toLowerCase())
+                      ? st.activity
+                      : `${where} · ${st.activity}`}
                   </span>
                 </span>
                 <span
@@ -153,7 +155,7 @@ function ReadyGauge({ value }: { value: number }) {
       <path
         d="M 12.1 48.7 A 26 26 0 1 1 51.9 48.7"
         fill="none"
-        stroke="rgba(150, 180, 226, 0.16)"
+        stroke="rgba(150, 180, 226, 0.1)"
         strokeWidth={5}
         strokeLinecap="round"
       />
@@ -264,10 +266,12 @@ function TeamCard({
                           {jt.positionLabel(displayPosAt(snap, teamIdx, death.tMs))}
                         </span>
                       ) : (
-                        <span className="dossier-vitals">
+                        <span
+                          className={`dossier-vitals${v.alive && v.output <= 30 ? ' vitals-low' : ''}`}
+                        >
                           {v.alive && status !== 'turned-back' ? (
                             <>
-                              SpO₂ <strong>{v.spo2}</strong> · output{' '}
+                              SpO₂ <strong>{v.spo2}%</strong> · output{' '}
                               <strong>{v.output}</strong> · {v.note}
                             </>
                           ) : (
@@ -296,7 +300,7 @@ function TeamCard({
         <h3>Supplies & condition</h3>
         <ul className="meterlist meterlist-2col">
           {bars.map(([label, v]) => (
-            <li key={label}>
+            <li key={label} title={`${label}: ${v} / 100`}>
               <span className="meter-label">{label}</span>
               <span className="meter-bar">
                 <span

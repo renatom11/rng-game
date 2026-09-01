@@ -333,14 +333,14 @@ export function albedoAt(x: number, z: number, y: number, slopeDeg: number): [nu
   // Geneva Spur: near-black rock rib against the ice.
   if (distToSeg(x, z, 300, 1460, 435, 1290) < 150 && y > 7550) return ALB.spur;
   // Steep ground sheds snow: rock walls.
-  if (slopeDeg > 53) return mix(ALB.rock, ALB.ice, Math.max(0, n - 0.6));
+  if (slopeDeg > 58) return mix(ALB.rock, ALB.ice, Math.max(0, n - 0.6));
   // The Lhotse Face is hard blue-grey ice, not snow.
   if (fm > 0.3 && slopeDeg > 30 && y > 6450 && y < 7900) {
     return mix(ALB.ice, ALB.snowA, n * 0.35);
   }
   // The Cwm floor: blinding glacier white.
   if (cwmMask(x, z) > 0.35 && slopeDeg < 26) return ALB.cwm;
-  let snow = mix(ALB.snowA, ALB.snowB, n);
+  let snow = mix(ALB.snowA, ALB.snowB, 0.25 + n * 0.5);
   // Matte at altitude: the mountain grows more abstract as it gets dangerous.
   if (y > 8050) snow = mix(snow, ALB.ice, Math.min(0.35, (y - 8050) / 2400));
   return snow;

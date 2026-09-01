@@ -289,22 +289,6 @@ export function MountainMap({ snap, teamNames, tMs, durationMs, selected, onSele
               {summit && (
                 <circle cx={x} cy={y} r={7} fill="#f6ecce" stroke="#c9b273" strokeWidth={1.6} />
               )}
-              <text
-                x={x + (summit ? -12 : 14)}
-                y={y - (summit ? 16 : major ? 3 : 2)}
-                textAnchor={summit ? 'end' : 'start'}
-                className={major ? 'mtn-label' : 'mtn-label mtn-label-minor'}
-              >
-                {node.label}
-              </text>
-              <text
-                x={x + (summit ? -12 : 14)}
-                y={y + (summit ? -2 : major ? 15 : 12)}
-                textAnchor={summit ? 'end' : 'start'}
-                className="mtn-alt"
-              >
-                {node.alt.toLocaleString()} m
-              </text>
             </g>
           );
         })}
@@ -408,6 +392,35 @@ export function MountainMap({ snap, teamNames, tMs, durationMs, selected, onSele
             </g>
           );
         })}
+
+        {/* Place names ride above the traffic — a chip never swallows one */}
+        <g pointerEvents="none">
+          {NODES.map((node) => {
+            const [x, y] = NODE_XY[node.id];
+            const major = !['BALC', 'SSUM', 'HILL'].includes(node.id);
+            const summit = node.id === 'SUMMIT';
+            return (
+              <g key={`lbl-${node.id}`}>
+                <text
+                  x={x + (summit ? -12 : 14)}
+                  y={y - (summit ? 16 : major ? 3 : 2)}
+                  textAnchor={summit ? 'end' : 'start'}
+                  className={major ? 'mtn-label' : 'mtn-label mtn-label-minor'}
+                >
+                  {node.label}
+                </text>
+                <text
+                  x={x + (summit ? -12 : 14)}
+                  y={y + (summit ? -2 : major ? 15 : 12)}
+                  textAnchor={summit ? 'end' : 'start'}
+                  className="mtn-alt"
+                >
+                  {node.alt.toLocaleString()} m
+                </text>
+              </g>
+            );
+          })}
+        </g>
       </g>
 
       {/* Route legend (fixed — does not zoom) */}
