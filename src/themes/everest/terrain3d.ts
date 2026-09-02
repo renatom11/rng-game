@@ -3,12 +3,12 @@
  * No three.js imports here — everything returns plain arrays and numbers so
  * it stays unit-testable and the renderer stays a thin consumer.
  *
- * World space: +X east, +Y up (meters), +Z south. The South Col route runs
- * from Base Camp in the southwest, up the Icefall, east along the Western
- * Cwm, up the Lhotse Face, over the Geneva Spur to the South Col, and up
- * the Southeast Ridge to the summit. The Everest–Lhotse–Nuptse horseshoe
- * encloses the Cwm, and the West Shoulder genuinely blocks the summit from
- * Base Camp — the goal is not visible from the lowest camera.
+ * World space: +X east, +Y up (meters), +Z south. The massif itself is a
+ * terrain model rather than a stack of analytic cones (see THE HEIGHTFIELD
+ * below), and the route is not drawn over it but fitted TO it: a ridge-walk
+ * descending from the model's own summit along the crest, sampled where it
+ * crosses each camp's altitude. So Base Camp sits in the southwest on real
+ * moraine, and every camp above it stands on a real spur.
  *
  * Fairness note: everything here is decoration over already-served data.
  * Positions come from displayPosAt, light from (elapsed/duration, storm).
@@ -22,43 +22,37 @@ import { NODES, SEGMENTS, type Risk } from './route';
 // ---------------------------------------------------------------------------
 
 export const WP3: Record<string, [number, number, number]> = {
-  BC: [-3600, 5364, 2600],
-  C1: [-2350, 6065, 2350],
-  C2: [-700, 6400, 2050],
-  C3: [150, 7160, 1800],
-  C4: [380, 7950, 1050],
-  BALC: [240, 8400, 700],
-  SSUM: [120, 8749, 380],
-  HILL: [80, 8790, 260],
-  SUMMIT: [0, 8849, 100],
+  BC: [-4563, 5364, 2435],
+  C1: [-3288, 6065, 1878],
+  C2: [-2853, 6400, 1688],
+  C3: [-2048, 7160, 1325],
+  C4: [-1230, 7950, 845],
+  BALC: [-931, 8400, 666],
+  SSUM: [-266, 8749, 303],
+  HILL: [-162, 8790, 231],
+  SUMMIT: [22, 8849, 108],
 };
 
 export const WP_FRAC: Record<string, number> = Object.fromEntries(
   NODES.map((n) => [n.id, n.frac]),
 );
 
-/** Horizontal shape points per leg (x, z) — altitudes are interpolated. */
+/**
+ * Horizontal shape points per leg (x, z) — altitudes are interpolated.
+ * These are not drawn by hand: they are the line a ridge-walk found on the
+ * heightfield, descending from the summit along the crest and sampled where
+ * it crosses each camp's altitude. So the route lies on a real spur of the
+ * real mountain rather than on a plausible-looking curve laid over it.
+ */
 const LEG_SHAPES: Record<string, [number, number][]> = {
-  // Khumbu Icefall: a thread that switches back constantly.
-  'BC-C1': [
-    [-3600, 2600], [-3390, 2515], [-3195, 2575], [-2990, 2465],
-    [-2830, 2540], [-2650, 2430], [-2495, 2475], [-2350, 2350],
-  ],
-  // Western Cwm: broad, nearly flat, and it bends.
-  'C1-C2': [
-    [-2350, 2350], [-1930, 2290], [-1480, 2270], [-1040, 2150], [-700, 2050],
-  ],
-  // Lower Lhotse Face, climbed diagonally.
-  'C2-C3': [[-700, 2050], [-340, 1975], [-60, 1895], [150, 1800]],
-  // Upper face: Yellow Band, then the Geneva Spur, then the Col.
-  'C3-C4': [[150, 1800], [285, 1615], [345, 1465], [425, 1295], [380, 1050]],
-  // Triangular Face above the Col — climbed in the dark.
-  'C4-BALC': [[380, 1050], [325, 895], [240, 700]],
-  // Southeast Ridge.
-  'BALC-SSUM': [[240, 700], [185, 545], [120, 380]],
-  // Cornice Traverse: a knife-edge, single file.
-  'SSUM-HILL': [[120, 380], [98, 318], [80, 260]],
-  'HILL-SUMMIT': [[80, 260], [38, 178], [0, 100]],
+  'BC-C1': [[-4563, 2435], [-4389, 2359], [-4186, 2271], [-4012, 2195], [-3838, 2119], [-3664, 2043], [-3462, 1954], [-3288, 1878]],
+  'C1-C2': [[-3288, 1878], [-3143, 1815], [-2998, 1751], [-2853, 1688]],
+  'C2-C3': [[-2853, 1688], [-2679, 1612], [-2532, 1553], [-2361, 1475], [-2219, 1405], [-2048, 1325]],
+  'C3-C4': [[-2048, 1325], [-1912, 1244], [-1775, 1165], [-1637, 1088], [-1502, 1007], [-1366, 926], [-1230, 845]],
+  'C4-BALC': [[-1230, 845], [-1121, 780], [-1040, 731], [-931, 666]],
+  'BALC-SSUM': [[-931, 666], [-790, 596], [-651, 519], [-541, 458], [-403, 379], [-266, 303]],
+  'SSUM-HILL': [[-266, 303], [-214, 267], [-162, 231]],
+  'HILL-SUMMIT': [[-162, 231], [-60, 157], [22, 108]],
 };
 
 const LEG_ORDER = [
@@ -120,32 +114,72 @@ export function posToXYZ(pos: number): [number, number, number] {
 // ---------------------------------------------------------------------------
 
 /**
- * Primitives are BASE-relative: they rise from the valley floor to the
- * peak altitude and fall back to the floor, so footprint width directly
- * sets slope. (Absolute-height falloff produced 7 km vertical cliffs.)
+ * THE HEIGHTFIELD
+ *
+ * The massif is no longer a stack of analytic cones and ridges. It is a real
+ * terrain model: a 4097x4097 DEM, cropped so its summit sits where the route
+ * model puts the summit, resampled to a 768x549 heightfield and shipped as
+ * public/terrain/massif.png. Elevation is packed into 12 bits across two 8-bit
+ * channels (red carries the high byte, green the low nibble), which survives a
+ * canvas round-trip exactly and quantises to about a metre.
+ *
+ * Everything here is still decoration over already-served data — the mountain
+ * has no idea who wins.
  */
-const FLOOR = 4750;
+export const HF = {
+  url: '/terrain/massif.png',
+  width: 896,
+  height: 640,
+  /** Elevations the packed range maps onto. */
+  altFloor: 4550,
+  altPeak: 8849,
+};
 
-function cone(x: number, z: number, px: number, pz: number, h: number, r: number, e: number) {
-  const t = Math.max(0, 1 - Math.hypot(x - px, z - pz) / r);
-  return FLOOR + (h - FLOOR) * Math.pow(t, e);
+let hfData: Float32Array | null = null;
+let hfPromise: Promise<void> | null = null;
+
+export function heightfieldReady(): boolean {
+  return hfData !== null;
 }
 
-function ridge(
-  x: number, z: number,
-  ax: number, az: number, ah: number,
-  bx: number, bz: number, bh: number,
-  w: number, e: number,
-) {
-  const dx = bx - ax;
-  const dz = bz - az;
-  const len2 = dx * dx + dz * dz || 1;
-  const s = Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / len2));
-  const hx = ax + dx * s;
-  const hz = az + dz * s;
-  const d = Math.hypot(x - hx, z - hz);
-  const t = Math.max(0, 1 - d / w);
-  return FLOOR + (ah + (bh - ah) * s - FLOOR) * Math.pow(t, e);
+/**
+ * Decode the heightfield once. `createImageBitmap` with colour management off
+ * matters: a colour-managed decode would rewrite the very byte values the
+ * elevation is packed into.
+ */
+export function loadHeightfield(): Promise<void> {
+  if (hfData) return Promise.resolve();
+  if (hfPromise) return hfPromise;
+  hfPromise = (async () => {
+    const res = await fetch(HF.url);
+    if (!res.ok) throw new Error(`heightfield ${res.status}`);
+    const bmp = await createImageBitmap(await res.blob(), {
+      colorSpaceConversion: 'none',
+      premultiplyAlpha: 'none',
+    });
+    const cv = document.createElement('canvas');
+    cv.width = bmp.width;
+    cv.height = bmp.height;
+    const ctx = cv.getContext('2d', { willReadFrequently: true });
+    if (!ctx) throw new Error('no 2d context');
+    ctx.drawImage(bmp, 0, 0);
+    const px = ctx.getImageData(0, 0, bmp.width, bmp.height).data;
+    const n = bmp.width * bmp.height;
+    const out = new Float32Array(n);
+    const span = HF.altPeak - HF.altFloor;
+    for (let i = 0; i < n; i++) {
+      const v = (px[i * 4] << 4) | (px[i * 4 + 1] >> 4);
+      out[i] = HF.altFloor + (v / 4095) * span;
+    }
+    hfData = out;
+    bmp.close();
+  })();
+  return hfPromise;
+}
+
+/** For tests and any Node-side use: install a heightfield directly. */
+export function setHeightfield(data: Float32Array): void {
+  hfData = data;
 }
 
 function hash2(ix: number, iz: number): number {
@@ -179,151 +213,25 @@ function distToSeg(x: number, z: number, ax: number, az: number, bx: number, bz:
   return Math.hypot(x - (ax + dx * s), z - (az + dz * s));
 }
 
-/** Bare structural height (no noise) — the massif's bones. */
-function boneHeight(x: number, z: number): number {
-  let h = FLOOR;
-  // Soft-max: hard max() creases alias into sawtooth silhouettes where
-  // primitives cross. A wide blend rounds every crest and, more
-  // importantly, gives the massif broad shoulders instead of thin blades.
-  const K = 150;
-  const put = (v: number) => {
-    const m = Math.max(h, v);
-    const n = Math.min(h, v);
-    h = m + K * Math.log1p(Math.exp((n - m) / K));
-  };
-
-  // Everest: summit pyramid, Southeast Ridge, West Shoulder, north bulk.
-  // Wide footprints with gentler exponents: the real mountain is an
-  // enormous broad pyramid, and steep narrow cones read as spikes.
-  put(cone(x, z, 0, 100, 8849, 2750, 1.45));
-  put(ridge(x, z, 0, 100, 8849, 120, 380, 8749, 1050, 1.5));
-  put(ridge(x, z, 120, 380, 8749, 240, 700, 8400, 1050, 1.5));
-  put(ridge(x, z, 240, 700, 8400, 380, 1050, 7950, 1100, 1.45));
-  put(ridge(x, z, 0, 100, 8849, -1450, 880, 7300, 1500, 1.35)); // West Shoulder
-  put(ridge(x, z, -1450, 880, 7300, -2600, 1500, 6400, 1400, 1.3));
-  put(cone(x, z, -150, -750, 7950, 2400, 1.3)); // north bulk
-  put(cone(x, z, 350, -1350, 7543, 1850, 1.4)); // Changtse-ish backside
-
-  // Lhotse: the head of the Cwm; its NW flank is the Lhotse Face.
-  put(cone(x, z, 950, 1700, 8516, 2150, 1.5));
-  put(ridge(x, z, 380, 1050, 7950, 950, 1700, 8516, 1050, 1.6));
-
-  // Lhotse → Nuptse wall: the south rampart of the Cwm.
-  put(ridge(x, z, 950, 1700, 8516, -150, 2780, 7500, 1150, 1.6));
-  put(ridge(x, z, -150, 2780, 7500, -950, 2930, 7861, 1100, 1.7)); // Nuptse
-  put(ridge(x, z, -950, 2930, 7861, -2100, 2870, 6850, 1150, 1.5));
-
-  // Western Cwm glacier floor — a broad, enclosed, gently rising valley.
-  put(ridge(x, z, -2350, 2350, 6020, -1450, 2260, 6200, 950, 0.5));
-  put(ridge(x, z, -1450, 2260, 6200, -650, 2060, 6420, 900, 0.5));
-
-  // Khumbu Icefall ramp and the glacier down past Base Camp.
-  put(ridge(x, z, -3650, 2620, 5300, -2350, 2350, 6050, 900, 0.65));
-  put(ridge(x, z, -4700, 3400, 5050, -3650, 2620, 5320, 1000, 0.65));
-
-  // Geneva Spur: a broad rock buttress angling up to the Col. Kept wide
-  // deliberately — a narrow, tall rib soft-maxes into a standing blade.
-  put(ridge(x, z, 300, 1460, 7620, 435, 1290, 7780, 700, 1.5));
-
-  // Secondary buttresses: shoulders and ribs hanging off the main faces.
-  // Without these the big flanks stay planar no matter how much noise
-  // rides on top — a mountain is built of subsidiary structure.
-  //
-  // Every altitude here is set BELOW the parent pyramid's height at that
-  // footprint. A rib that asserts more height than the face it hangs on
-  // does not read as a rib: it stands up as a pillar at its endpoint.
-  put(ridge(x, z, -420, 480, 7600, -1180, 60, 6500, 760, 1.45)); // NW rib
-  put(ridge(x, z, 620, 620, 7150, 1180, 220, 6450, 700, 1.45)); // NE rib
-  put(ridge(x, z, -260, 1180, 6620, -880, 1720, 5900, 660, 1.4)); // SW spur
-  put(ridge(x, z, -1980, 1180, 6850, -2620, 780, 6200, 780, 1.35)); // W shoulder step
-  put(cone(x, z, -1620, 300, 6080, 1100, 1.5)); // west satellite
-  put(cone(x, z, 1350, 900, 6380, 1200, 1.5)); // Lhotse north shoulder
-  put(ridge(x, z, 780, 2350, 6620, 180, 2760, 6150, 700, 1.45)); // Lhotse-Nuptse rib
-  put(cone(x, z, -1750, 2600, 6260, 1000, 1.45)); // Nuptse west top
-
-  return h;
-}
-
-/**
- * Peaks that shed ribs. Real mountains are not cones: spurs and buttresses
- * radiate from every summit with couloirs between them, and that radial
- * corrugation — not the outline — is what makes a face read as rock and
- * snow instead of a shaded triangle. [x, z, reach].
- */
-const FLUTE_PEAKS: [number, number, number][] = [
-  [0, 100, 2300], // Everest
-  [950, 1700, 1900], // Lhotse
-  [-950, 2930, 1500], // Nuptse
-  [-150, -750, 2100], // north bulk
-  [350, -1350, 1650], // Changtse
-];
-
-/**
- * Radial fluting: noise sampled in each peak's polar frame, so ribs run
- * downhill from the summit at irregular spacing rather than as a clean
- * sine comb. Ridged (1 - |2n-1|) so spurs are sharp and the gullies
- * between them are broad — the real asymmetry of an eroded face.
- */
-function fluting(x: number, z: number): number {
-  let f = 0;
-  for (const [px, pz, R] of FLUTE_PEAKS) {
-    const dx = x - px;
-    const dz = z - pz;
-    const d = Math.hypot(dx, dz);
-    if (d > R || d < 40) continue;
-    // True arc length, not raw angle: near a summit the angular coordinate
-    // spins far faster than the grid can sample it, and that aliasing
-    // spikes into needles. Arc length changes at most one grid step per
-    // step, so ribs stay ~200 m wide and band-limited everywhere.
-    const s = Math.atan2(dz, dx) * d;
-    // Broad ribs: Everest's spurs are hundreds of metres wide, and the
-    // faces between them are vast smooth snowfields. Sharp, closely
-    // spaced corrugation would read as a spiky prop, not a mountain.
-    const a = 1 - Math.abs(vnoise(s, d * 0.45, 520) * 2 - 1);
-    const b = 1 - Math.abs(vnoise(s * 2.3 + 517, d * 0.45, 380) * 2 - 1);
-    const rib = a * 0.82 + b * 0.18;
-    // Ribs die at the summit point and fade into the valley floor.
-    const t = d / R;
-    const env = Math.pow(Math.sin(Math.PI * Math.min(1, t)), 0.75);
-    f += (rib - 0.52) * env;
-  }
-  return f;
-}
-
-/**
- * Domain warp: bends the whole coordinate field before the primitives are
- * evaluated, so ridgelines meander and no crest runs ruler-straight from
- * summit to base. Two scales — a long bend and a shorter wobble.
- */
-function warpXZ(x: number, z: number): [number, number] {
-  const wx =
-    (vnoise(x + 1013, z - 77, 2100) - 0.5) * 320 +
-    (vnoise(x - 289, z + 613, 760) - 0.5) * 110;
-  const wz =
-    (vnoise(x - 431, z + 917, 2100) - 0.5) * 320 +
-    (vnoise(x + 733, z - 205, 760) - 0.5) * 110;
-  return [x + wx, z + wz];
-}
-
-const ICE_A = WP3.BC;
-const ICE_B = WP3.C1;
-
-function icefallMask(x: number, z: number): number {
-  const d = distToSeg(x, z, ICE_A[0], ICE_A[2], ICE_B[0], ICE_B[2]);
-  return Math.max(0, 1 - d / 720);
-}
-
-function faceMask(x: number, z: number): number {
-  const d = distToSeg(x, z, -650, 2050, 400, 1150);
-  return Math.max(0, 1 - d / 950);
-}
-
-function cwmMask(x: number, z: number): number {
-  const d = Math.min(
-    distToSeg(x, z, -2350, 2350, -1450, 2260),
-    distToSeg(x, z, -1450, 2260, -650, 2060),
-  );
-  return Math.max(0, 1 - d / 820);
+/** Bilinear sample of the DEM, clamped at the edges. */
+function sampleHF(x: number, z: number): number {
+  const d = hfData;
+  if (!d) return HF.altFloor;
+  const u = ((x - GRID.x0) / (GRID.x1 - GRID.x0)) * (HF.width - 1);
+  const v = ((z - GRID.z0) / (GRID.z1 - GRID.z0)) * (HF.height - 1);
+  const cu = Math.min(HF.width - 1, Math.max(0, u));
+  const cv = Math.min(HF.height - 1, Math.max(0, v));
+  const i0 = Math.floor(cu);
+  const j0 = Math.floor(cv);
+  const i1 = Math.min(HF.width - 1, i0 + 1);
+  const j1 = Math.min(HF.height - 1, j0 + 1);
+  const fx = cu - i0;
+  const fz = cv - j0;
+  const a = d[j0 * HF.width + i0];
+  const b = d[j0 * HF.width + i1];
+  const c = d[j1 * HF.width + i0];
+  const e = d[j1 * HF.width + i1];
+  return (a + (b - a) * fx) * (1 - fz) + (c + (e - c) * fx) * fz;
 }
 
 /** Nearest route point: [distance, altitude there]. Build-time only. */
@@ -347,55 +255,63 @@ function routePull(x: number, z: number): [number, number] {
 }
 
 export function heightAt(x: number, z: number): number {
-  // The structural primitives are evaluated in a warped frame, so the
-  // massif keeps its real geography while every ridgeline wanders.
-  const [wx, wz] = warpXZ(x, z);
-  const bones = boneHeight(wx, wz);
-  const alt01 = Math.max(0, Math.min(1, (bones - 5000) / 3800));
-  const ice = icefallMask(x, z);
-
-  // Radial spurs and couloirs — the layer that breaks planar faces.
-  // Strongest on the high flanks, gone by the glacier floor.
-  // Relief eases off toward the summit: the high ridges are wind-scoured
-  // and smooth, and corrugating them reads as serration on a knife edge.
-  const flute = fluting(wx, wz) * (52 + 30 * alt01 * (1 - alt01)) * (1 - ice * 0.7);
-
-  // Ridged erosion: long shallow drainages, not chatter. Low frequency
-  // and low amplitude keep the great faces broad and smooth.
-  const rg =
-    (1 - Math.abs(vnoise(wx * 1.0 + 71, wz * 1.0 - 233, 1250) * 2 - 1)) * 0.66 +
-    (1 - Math.abs(vnoise(wx * 1.0 - 517, wz * 1.0 + 89, 520) * 2 - 1)) * 0.34;
-  const erosion = (rg - 0.55) * (34 + 24 * alt01 * (1 - alt01)) * (1 - ice * 0.5);
-
-  // Faceting noise: calm on the high ridge, chaotic in the Icefall. Cells
-  // stay several grid steps wide — near-Nyquist noise reads as spikes.
-  // The glacier floor is not a billiard table: long, low swells keep the
-  // low ground from reading as a flat pan with a rectangular edge.
-  const valley = Math.max(0, Math.min(1, (5750 - bones) / 800));
-  // ...and it drains away from the massif, the way the Khumbu Glacier does,
-  // so the low ground reads as a valley floor rather than a table top.
-  const grade = Math.max(0, Math.min(1, (Math.hypot(x, z) - 2800) / 6000)) * 420;
-  const swell =
-    ((vnoise(wx + 401, wz - 233, 2600) - 0.5) * 150 +
-      (vnoise(wx - 877, wz + 611, 1150) - 0.5) * 70 - grade) * valley;
-
-  const amp = 18 * (1 - alt01 * 0.85) + 55 * ice;
-  const n =
-    (vnoise(wx, wz, 920) - 0.5) * 0.65 +
-    (vnoise(wx + 913, wz - 417, 330) - 0.5) * 0.35 +
-    (vnoise(wx - 311, wz + 731, 150) - 0.5) * 0.45 * ice;
-  let h = bones + flute + erosion + swell + n * amp;
+  const base = sampleHF(x, z);
+  // The DEM resolves to about 10 m. Below that the surface would be flat under
+  // a close camera, so a small amount of relief is added back — enough to give
+  // the snow tooth, far too little to invent a landform. Kept low on purpose:
+  // high-frequency height detail on steep ground is what used to make the
+  // rock/snow boundary comb.
+  const fine =
+    (vnoise(x + 311, z - 97, 210) - 0.5) * 6 +
+    (vnoise(x - 733, z + 451, 78) - 0.5) * 3;
+  let h = base + fine;
+  // Below the snowline the ground is the glacier's own moraine — hummocks and
+  // medial ridges a few tens of metres across, which the DEM resolves at none
+  // of its scales. Without them Base Camp stands on a blank pale pan.
+  const lowT = 1 - smoothStep(5250, 6050, base);
+  if (lowT > 0) {
+    h += lowT * (
+      (vnoise(x - 121, z + 349, 320) - 0.5) * 26
+      + (vnoise(x + 517, z - 233, 130) - 0.5) * 12
+    );
+  }
   // The climbing line lies ON the mountain: blend the surface to the route
-  // altitude in a corridor around it, so lights sit on snow, not in air.
+  // altitude in a corridor around it, so lights sit on snow, not in air. The
+  // route was fitted to this very heightfield, so the correction is small —
+  // it only has to absorb the fine layer and the resampling.
   const [d, ra] = routePull(x, z);
-  if (d < 430) {
-    const t = 1 - d / 430;
-    // The climbing line lies ON the mountain: the surface is blended all
-    // the way to the route altitude, so camps and lights sit on snow
-    // rather than floating over a face the primitives left too low.
-    h += (ra - 18 - h) * (t * t * (3 - 2 * t)) * 0.95;
+  if (d < 260) {
+    const t = 1 - d / 260;
+    h += (ra - 14 - h) * (t * t * (3 - 2 * t)) * 0.9;
   }
   return h;
+}
+
+/**
+ * Local steepness in degrees, measured across a wide baseline so it describes
+ * the FACE rather than the fine layer riding on it. Used by the albedo.
+ */
+export function slopeAt(x: number, z: number, b = 120): number {
+  const gx = (sampleHF(x + b, z) - sampleHF(x - b, z)) / (2 * b);
+  const gz = (sampleHF(x, z + b) - sampleHF(x, z - b)) / (2 * b);
+  return (Math.atan(Math.hypot(gx, gz)) * 180) / Math.PI;
+}
+
+/**
+ * How much this point stands above its own neighbourhood, 0..1 — a rib reads
+ * high, a couloir reads zero.
+ *
+ * The window is measured, not guessed: across this model's snow-covered ground
+ * the relief above a 150 m neighbourhood runs about -44 m to +69 m, so the old
+ * 10..130 m window sat almost entirely off the top of the distribution and the
+ * function returned ~0.05 everywhere, silently switching off every term that
+ * depended on it.
+ */
+export function crestAt(x: number, z: number, b = 150): number {
+  const c = sampleHF(x, z);
+  const avg =
+    (sampleHF(x + b, z) + sampleHF(x - b, z) + sampleHF(x, z + b) + sampleHF(x, z - b)) / 4;
+  return smoothStep(-5, 42, c - avg);
 }
 
 // ---------------------------------------------------------------------------
@@ -527,7 +443,17 @@ export function posToXYZOn(
 // ---------------------------------------------------------------------------
 
 export const GRID = {
-  x0: -5400, x1: 2500, z0: -1700, z1: 3950, nx: 520, nz: 370,
+  // The world box is the crop's own footprint at a fixed 14.1 m per DEM pixel.
+  // Scale is not free here: squeezing more of the model into the same box
+  // steepens every slope in it, and the first attempt — the whole massif
+  // packed into an 7.9 x 5.7 km world — came out a bloated dome with every
+  // drainage cut into a gorge. Widening the world with the crop keeps the
+  // model's own gradients and simply shows more of it.
+  x0: -8640, x1: 4000, z0: -2780, z1: 6260,
+  // Just under the heightfield's own 896x640, so the mesh resolves what the
+  // DEM actually carries and no more; height lookup is an array read, so the
+  // grid costs far less than the old analytic terrain's did.
+  nx: 768, nz: 549,
 };
 
 function hex(c: string): [number, number, number] {
@@ -542,56 +468,103 @@ const ALB = {
   snowA: hex('#e9f0fa'), snowB: hex('#f7fafe'),
   cwm: hex('#f4f8ff'),
   ice: hex('#b6cfe7'),
-  rock: hex('#53607b'),
-  band: hex('#c2a668'),
-  spur: hex('#39415a'),
+  // Near-neutral, and dark. At #53607b the exposed rock was bluer than the
+  // snow's own shadows, so every rib read as one more shadow instead of as
+  // the mountain's bones.
+  rock: hex('#4b4f5a'),
+  // A warm grey, not a yellow. This used to be #c2a668 painted straight over
+  // the snow at 7,350-7,680 m, and on a real heightfield an altitude window
+  // is a CONTOUR — so it wrapped the entire massif in a mustard sash.
+  band: hex('#9d8a63'),
+  spur: hex('#2f333d'),
   moraine: hex('#66655f'),
   rubble: hex('#74716b'),
+  scree: hex('#565550'),
+  glacier: hex('#9fabb0'),
 };
 
 function mix(a: [number, number, number], b: [number, number, number], t: number): [number, number, number] {
   return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
 }
 
-/** Albedo for a vertex, from altitude, slope (degrees) and region masks. */
+/**
+ * Albedo for a vertex, read off the terrain rather than off a map of named
+ * places. The old version blended in a hand-placed Lhotse Face, Western Cwm
+ * and Geneva Spur, each a line segment drawn against the analytic massif that
+ * no longer exists — on a real heightfield they landed on whatever happened to
+ * be there. Snow line, glacier flats, ice faces and rock walls now all fall
+ * out of altitude, steepness and whether the ground is a crest or a gully,
+ * which is what actually decides them on a mountain.
+ */
 export function albedoAt(
   x: number, z: number, y: number, slopeDeg: number,
   /** 0..1, how much this point stands above its neighbourhood (a crest). */
   crest = 0,
 ): [number, number, number] {
   const n = vnoise(x + 57, z + 991, 300);
-  const fm = faceMask(x, z);
   // Every boundary below is a smooth blend, not a threshold: a hard cut
   // across noisy terrain fringes into a scratchy band that reads as a
   // rendering glitch rather than a geological contact.
-  const band = smoothBand(y, 7330, 7660, 90) * smoothStep(0.2, 0.42, fm) * smoothStep(20, 34, slopeDeg);
-  const rockAmt = smoothStep(46, 68, slopeDeg) * (1 - crest * 0.85);
-  const faceAmt =
-    smoothStep(0.24, 0.42, fm) * smoothStep(26, 38, slopeDeg) * smoothBand(y, 6350, 8000, 260);
 
-  // The Lhotse Face is hard blue-grey ice, not snow.
+  // Rock stands on the RIBS, snow lies in the couloirs between them — that is
+  // what a Himalayan face looks like, and it is the whole large-scale value
+  // structure of the mountain. Backwards (rock in the gullies) every drainage
+  // on the model got a dark outline and the massif came out looking furred.
+  // The 30-48 deg window is where this surface's slopes actually live: median
+  // 34, ninetieth percentile 46.
+  // The altitude weight is what gives the massif its large-scale read: a dark
+  // summit pyramid over a white middle over grey moraine. Without it the ribs
+  // carry the same rock at every height and the whole flank textures evenly,
+  // which at a distance is indistinguishable from noise.
+  const rockAmt = smoothStep(28, 46, slopeDeg) * (0.22 + 0.78 * crest)
+    * (0.3 + 0.7 * smoothStep(6500, 8200, y));
+  // Hard blue ice: steep, high, and down in the couloirs — wherever rock has
+  // not already taken the ground.
+  const faceAmt =
+    smoothStep(31, 44, slopeDeg) * smoothBand(y, 6300, 8300, 380)
+    * (1 - crest * 0.5) * (1 - rockAmt);
+  // Glacier flats: high ground that is nearly level is a snowfield or a cwm
+  // floor, and it is the brightest thing on the mountain.
+  const flat =
+    (1 - smoothStep(9, 20, slopeDeg)) * smoothStep(5700, 6400, y) * (1 - crest * 0.35);
+  // The Yellow Band is a stratum IN the rock, so it warms the rock instead of
+  // being painted over whatever the altitude window crosses.
+  const bandAmt = smoothBand(y, 7380, 7660, 130);
+
   const ice = mix(ALB.ice, ALB.snowA, n * 0.35);
   let snow = mix(ALB.snowA, ALB.snowB, 0.25 + n * 0.5);
   if (y > 8050) snow = mix(snow, ALB.ice, Math.min(0.35, (y - 8050) / 2400));
+  // The darkest rock is the wall in the back of a gully, where nothing lies.
+  const rock = mix(
+    mix(ALB.rock, ALB.spur, smoothStep(42, 58, slopeDeg) * 0.75),
+    ALB.band, bandAmt * 0.6,
+  );
   let base = mix(snow, ice, faceAmt);
-  // The Cwm floor: blinding glacier white. Blended in rather than switched
-  // on, or its edge cuts a serrated line across the valley walls.
-  const cwm = smoothStep(0.28, 0.44, cwmMask(x, z)) * (1 - smoothStep(22, 30, slopeDeg));
-  base = mix(base, ALB.cwm, cwm);
-  // Yellow Band: pale limestone cutting across the upper face.
-  base = mix(base, mix(ALB.band, ALB.snowA, Math.max(0, (slopeDeg - 48) / 22)), band);
-  // Steep ground sheds snow: rock walls.
-  base = mix(base, mix(ALB.rock, ALB.ice, Math.max(0, n - 0.6)), rockAmt);
-  // Geneva Spur: near-black rock rib against the ice.
-  const spur =
-    Math.max(0, 1 - distToSeg(x, z, 300, 1460, 435, 1290) / 190) * smoothStep(7450, 7620, y);
-  base = mix(base, ALB.spur, Math.min(1, spur));
-  // Below the snowline: glacier rubble and moraine. Feathered over 280 m of
-  // altitude — as a hard cut at 5820 m it sawed a serrated horizontal ledge
-  // right across the fluted lower slopes wherever the ribs crossed it.
-  const nearBC = Math.max(0, 1 - Math.hypot(x - WP3.BC[0], z - WP3.BC[2]) / 900);
-  const ground = mix(mix(ALB.moraine, ALB.rubble, n), ALB.rubble, nearBC * 0.5);
+  base = mix(base, ALB.cwm, flat);
+  base = mix(base, mix(rock, ALB.ice, Math.max(0, n - 0.62)), rockAmt);
+  // Below the snowline: glacier rubble and moraine. Feathered over altitude —
+  // as a hard cut it saws a serrated ledge wherever the relief crosses it.
+  const nearBC = Math.max(0, 1 - Math.hypot(x - WP3.BC[0], z - WP3.BC[2]) / 1400);
+  const ground = mix(groundAlbedo(x, z, slopeDeg, crest), ALB.rubble, nearBC * 0.45);
   return mix(base, ground, 1 - snowAmt(y, vnoise(x + 77, z - 13, 1100)));
+}
+
+/**
+ * The ground below the snowline, shared by the hero terrain and the far range
+ * so the two cannot disagree along the seam. It used to be one flat wash of
+ * moraine, which across several square kilometres of frame read as a slab; it
+ * now takes the same rib/gully treatment as the snow above it — scree in the
+ * hollows, paler rubble on the spurs — plus dirty glacier ice on the flats,
+ * which is what actually fills these valleys.
+ */
+function groundAlbedo(
+  x: number, z: number, slopeDeg: number, crest: number,
+): [number, number, number] {
+  const n = vnoise(x + 77, z - 13, 1100);
+  const valleyFlat = (1 - smoothStep(6, 16, slopeDeg)) * (1 - crest);
+  let g = mix(ALB.scree, ALB.rubble, 0.25 + 0.5 * n + 0.35 * crest);
+  g = mix(g, ALB.moraine, vnoise(x - 233, z + 617, 480) * 0.5);
+  return mix(g, ALB.glacier, valleyFlat * 0.45);
 }
 
 function smoothStep(a: number, b: number, x: number): number {
@@ -636,28 +609,14 @@ export function buildTerrain(): TerrainData {
       positions[k * 3 + 1] = y;
       positions[k * 3 + 2] = zj;
       heights[k] = heightAt(x, z);
-      // Slope for ALBEDO is measured across a wide baseline, not cell to
-      // cell. Whether ground is rock or snow is a question about the face,
-      // and the face is fluted: ribs are ~200 m apart and swing the local
-      // gradient by ~30°, so any baseline shorter than a rib throws vertex
-      // after vertex onto opposite sides of the rock cutoff and paints every
-      // steep face with a comb of black teeth, one per rib. Lighting still
-      // uses the true per-vertex normal, so the ribs keep all their relief —
-      // they just stop changing the geology.
-      const bx = dx * 16;
-      const bz = dz * 16;
-      const hE = heightAt(xj + bx, zj);
-      const hW = heightAt(xj - bx, zj);
-      const hS = heightAt(xj, zj + bz);
-      const hN = heightAt(xj, zj - bz);
-      const sx = (hE - hW) / (2 * bx);
-      const sz = (hS - hN) / (2 * bz);
-      const slope = (Math.atan(Math.hypot(sx, sz)) * 180) / Math.PI;
-      // How much this vertex stands above its own neighbourhood. A crest is
-      // convex, and a wide baseline laid across one reads the fall on either
-      // side as steepness — which painted a dark rock rim along the top of
-      // every ridge. Snow sits on crests; rock is the wall below them.
-      const crest = smoothStep(25, 150, y - (hE + hW + hS + hN) / 4);
+      // Geology is asked of the DEM directly, not of heightAt: the fine
+      // relief layer riding on the surface would throw vertex after vertex
+      // onto opposite sides of the rock cutoff and comb every steep face,
+      // and routePull would run the whole route polyline four more times per
+      // vertex. Lighting still uses the true per-vertex normal, so the relief
+      // keeps all of its bite — it just stops deciding the geology.
+      const slope = slopeAt(xj, zj);
+      const crest = crestAt(xj, zj);
       const [r, g, b] = albedoAt(xj, zj, y, slope, crest);
       colors[k * 3] = r;
       colors[k * 3 + 1] = g;
@@ -794,15 +753,20 @@ export function buildContours(t: TerrainData): ContourLevel[] {
 // Skyline impostors, star dome, sun path, camera presets.
 // ---------------------------------------------------------------------------
 
-/** Distant peaks — silhouettes that give the sky a horizon. */
+/**
+ * Distant peaks — silhouettes that give the sky a horizon. Positions and radii
+ * moved out with the world box (same bearings, same apparent size), because
+ * half of them ended up standing INSIDE the wider hero grid, where the massif
+ * simply swallows them.
+ */
 export const IMPOSTORS = [
-  { name: 'Pumori', x: -6300, z: 1200, alt: 7161, r: 1150 },
-  { name: 'Ama Dablam', x: -1600, z: 5600, alt: 6812, r: 900 },
-  { name: 'Makalu', x: 5600, z: 2600, alt: 8485, r: 1900 }, // dawn comes up here
-  { name: 'Cho Oyu', x: -7200, z: -900, alt: 8188, r: 2100 },
-  { name: 'Kangchenjunga', x: 10500, z: 3600, alt: 8586, r: 2600 },
-  { name: 'Baruntse', x: 3400, z: 4800, alt: 7129, r: 1100 },
-  { name: 'Taboche', x: -6400, z: 3800, alt: 6495, r: 1000 },
+  { name: 'Pumori', x: -10080, z: 1920, alt: 7161, r: 1840 },
+  { name: 'Ama Dablam', x: -2560, z: 8960, alt: 6812, r: 1440 },
+  { name: 'Makalu', x: 8960, z: 4160, alt: 8485, r: 3040 }, // dawn comes up here
+  { name: 'Cho Oyu', x: -11520, z: -1440, alt: 8188, r: 3360 },
+  { name: 'Kangchenjunga', x: 16800, z: 5760, alt: 8586, r: 4160 },
+  { name: 'Baruntse', x: 5440, z: 7680, alt: 7129, r: 1760 },
+  { name: 'Taboche', x: -10240, z: 6080, alt: 6495, r: 1600 },
 ];
 
 /**
@@ -812,16 +776,16 @@ export const IMPOSTORS = [
  */
 export const FAR_PEAKS = [
   ...IMPOSTORS,
-  { name: '', x: 1800, z: -9500, alt: 7050, r: 1700 },
-  { name: '', x: -3400, z: -12500, alt: 6900, r: 2200 },
-  { name: '', x: 7800, z: -6800, alt: 7350, r: 1900 },
-  { name: '', x: -9800, z: -6200, alt: 6750, r: 2000 },
-  { name: '', x: -13500, z: 3400, alt: 6600, r: 2100 },
-  { name: '', x: -8600, z: 8800, alt: 6580, r: 1800 },
-  { name: '', x: 5400, z: 9600, alt: 6880, r: 1900 },
-  { name: '', x: 12800, z: -2400, alt: 7500, r: 2400 },
-  { name: '', x: -2400, z: 12800, alt: 6400, r: 2300 },
-  { name: '', x: 16500, z: 8200, alt: 7300, r: 2600 },
+  { name: '', x: 2880, z: -15200, alt: 7050, r: 2720 },
+  { name: '', x: -5440, z: -20000, alt: 6900, r: 3520 },
+  { name: '', x: 12480, z: -10880, alt: 7350, r: 3040 },
+  { name: '', x: -15680, z: -9920, alt: 6750, r: 3200 },
+  { name: '', x: -21600, z: 5440, alt: 6600, r: 3360 },
+  { name: '', x: -13760, z: 14080, alt: 6580, r: 2880 },
+  { name: '', x: 8640, z: 15360, alt: 6880, r: 3040 },
+  { name: '', x: 20480, z: -3840, alt: 7500, r: 3840 },
+  { name: '', x: -3840, z: 20480, alt: 6400, r: 3680 },
+  { name: '', x: 26400, z: 13120, alt: 7300, r: 4160 },
 ];
 
 /**
@@ -847,16 +811,16 @@ export function farHeightAt(x: number, z: number): number {
   // error under the hero mesh, and buildFarRange drops the interior entirely.
   if (dOut < 1e-6) {
     const dIn = Math.min(x - GRID.x0, GRID.x1 - x, z - GRID.z0, GRID.z1 - z);
-    const s = Math.min(1, Math.max(0, dIn / 700));
+    const s = Math.min(1, Math.max(0, dIn / 1120));
     return heightAt(x, z) - 30 - 900 * (s * s * (3 - 2 * s));
   }
   // Ridged noise: fold value noise into sharp crests, two octaves, with
   // the domain skewed so ranges run with the Himalaya's grain.
   const sx = x * 0.82 + z * 0.42;
   const sz = z * 0.86 - x * 0.30;
-  const r1 = 1 - Math.abs(vnoise(sx, sz, 3100) * 2 - 1);
-  const r2 = 1 - Math.abs(vnoise(sx + 913, sz + 411, 1350) * 2 - 1);
-  const rangeMask = Math.pow(vnoise(x - 511, z + 733, 8200), 1.5);
+  const r1 = 1 - Math.abs(vnoise(sx, sz, 4960) * 2 - 1);
+  const r2 = 1 - Math.abs(vnoise(sx + 913, sz + 411, 2160) * 2 - 1);
+  const rangeMask = Math.pow(vnoise(x - 511, z + 733, 13120), 1.5);
   const dist = Math.hypot(x, z);
   // Ranges grow with distance from the massif. Without this ramp the far
   // terrain reaches full height the instant it leaves the hero grid, and
@@ -867,8 +831,8 @@ export function farHeightAt(x: number, z: number): number {
   // shape of the hero grid. Warping the distance breaks that: the terrain
   // still rises away from the massif, but along an irregular front, so nothing
   // traces the grid. The warp vanishes at dOut = 0, so the seam stays matched.
-  const warp = 0.55 + 0.95 * vnoise(x + 4400, z - 2100, 5200)
-    + 0.34 * (vnoise(x - 900, z + 1750, 1900) - 0.5);
+  const warp = 0.55 + 0.95 * vnoise(x + 4400, z - 2100, 8320)
+    + 0.34 * (vnoise(x - 900, z + 1750, 3040) - 0.5);
   const dW = dOut * warp;
   // Hold the ranges down for the first few kilometres. Inside the grid the
   // terrain is the massif's low outwash plain; if the far ranges start rising
@@ -876,9 +840,9 @@ export function farHeightAt(x: number, z: number): number {
   // whole thing reads as a slab the mountain was placed on. Letting the plain
   // run on — along a warped, irregular front — puts the rise somewhere that
   // has nothing to do with the rectangle.
-  const grow = Math.min(1, Math.max(0, dW - 2600) / 13000);
-  const farAmp = (950 + Math.min(1, dist / 22000) * 1500) * 2.1 * (grow * grow * (3 - 2 * grow));
-  const base = 4150 + (vnoise(x + 31, z - 87, 6200) - 0.5) * 650;
+  const grow = Math.min(1, Math.max(0, dW - 2200) / 14000);
+  const farAmp = (950 + Math.min(1, dist / 35000) * 1500) * 2.1 * (grow * grow * (3 - 2 * grow));
+  const base = 4150 + (vnoise(x + 31, z - 87, 9920) - 0.5) * 650;
   let h = base + (r1 * 0.66 + r2 * 0.34) * rangeMask * farAmp;
   for (const p of FAR_PEAKS) {
     const t = Math.max(0, 1 - Math.hypot(x - p.x, z - p.z) / (p.r * 2.1));
@@ -891,7 +855,7 @@ export function farHeightAt(x: number, z: number): number {
   // base. Blended over a kilometre that edge reads as a floating slab, so
   // the transition is a 4 km apron instead: the massif's outwash plain
   // running down into the valley system, which is what is actually there.
-  const t = Math.min(1, dW / 4000);
+  const t = Math.min(1, dW / 6400);
   // Tucked under the hero mesh so the two never z-fight at the seam. 30 m is
   // invisible across a 4 km apron and clears the coarse mesh's sampling error.
   const edgeH = heightAt(cx, cz) - 30;
@@ -900,26 +864,23 @@ export function farHeightAt(x: number, z: number): number {
 
 const FAR_ALB = {
   snow: hex('#dfe9f6'), snowHi: hex('#edf3fb'),
-  rock: hex('#46506b'),
-  // The SAME ground the hero terrain uses. These were a shade darker and
-  // browner, and since the massif's whole outwash plain is bare ground, that
-  // constant offset painted the hero grid as a lighter rectangle sitting on
-  // the valley floor — the slab the mountain appeared to be placed on. At the
-  // seam the two differed by only ~0.07, which is nothing on a ridge and
-  // unmistakable across ten square kilometres of flat pan.
-  valley: hex('#66655f'), valleyB: hex('#74716b'),
+  rock: hex('#464b57'),
 };
 
 export function farAlbedoAt(x: number, z: number, y: number, slopeDeg: number): [number, number, number] {
   const n = vnoise(x + 77, z - 13, 1100);
   const rock = mix(FAR_ALB.rock, FAR_ALB.snow, Math.max(0, n - 0.55));
   const snow = mix(FAR_ALB.snow, FAR_ALB.snowHi, 0.2 + n * 0.6);
-  let base = mix(snow, rock, smoothStep(46, 62, slopeDeg));
+  // This mesh samples every ~280 m, so its slopes are a fraction of the hero
+  // terrain's; asking for 46-62 degrees out here meant the far ranges never
+  // showed any rock at all and the whole horizon read as a white blanket.
+  let base = mix(snow, rock, smoothStep(24, 42, slopeDeg));
   // Feathered, and on the SAME snowline the hero terrain uses. A hard cut here
   // put a crisp tan/white contour across the far range; a snowline 400 m below
   // the hero's put that contour right where the two meshes meet, so it traced
-  // the grid boundary.
-  base = mix(base, mix(FAR_ALB.valley, FAR_ALB.valleyB, n), 1 - snowAmt(y, n));
+  // the grid boundary. The ground below it is the hero terrain's own, for the
+  // same reason: any constant offset paints the grid as a rectangle.
+  base = mix(base, groundAlbedo(x, z, slopeDeg, 0), 1 - snowAmt(y, n));
   return base;
 }
 
@@ -942,8 +903,8 @@ export interface FarRangeData {
 
 /** Build the far-range mesh: coarse, jittered, AO-shaded, huge. */
 export function buildFarRange(): FarRangeData {
-  const fx0 = -30000, fx1 = 26000, fz0 = -24000, fz1 = 26000;
-  const nx = 230, nz = 205;
+  const fx0 = -46000, fx1 = 42000, fz0 = -38000, fz1 = 42000;
+  const nx = 314, nz = 286;
   const dx = (fx1 - fx0) / (nx - 1);
   const dz = (fz1 - fz0) / (nz - 1);
   const positions = new Float32Array(nx * nz * 3);
@@ -1061,18 +1022,27 @@ export interface CamPreset {
   pos: [number, number, number];
 }
 
+/**
+ * Every preset frames a leg of the route on the real surface: the target sits
+ * ON the terrain, and the camera stands DOWN-ROUTE of it, so the shot looks up
+ * the mountain with the massif behind its subject and the sightline clears the
+ * ground between. Aiming by the local downhill alone is not enough — at Base
+ * Camp that points out along the flat glacier, and the camera framed a blank
+ * pan with the mountain behind its back. Hand-chosen positions could not
+ * survive a terrain swap; these were derived from the heightfield itself.
+ */
 export const CAM_PRESETS: CamPreset[] = [
-  { id: 'overview', label: 'Massif', target: [-900, 6900, 1500], pos: [-3100, 8600, 6400] },
-  { id: 'bc', label: 'Base Camp', target: [-3550, 5500, 2580], pos: [-5000, 6300, 4300] },
-  { id: 'icefall', label: 'Icefall', target: [-2950, 5850, 2470], pos: [-3600, 6350, 4100] },
-  { id: 'cwm', label: 'Cwm', target: [-1400, 6350, 2180], pos: [-3200, 7600, 4300] },
-  { id: 'face', label: 'Lhotse Face', target: [-100, 6950, 1830], pos: [-2350, 7550, 2950] },
-  { id: 'col', label: 'South Col', target: [380, 7960, 1050], pos: [-900, 9300, 2700] },
-  { id: 'ridge', label: 'Summit Ridge', target: [140, 8560, 470], pos: [-1250, 8720, 1500] },
+  { id: 'overview', label: 'Massif', target: [-2600, 6614, 1600], pos: [-9604, 10814, 6591] },
+  { id: 'bc', label: 'Base Camp', target: [-4563, 5350, 2435], pos: [-6312, 5440, 2484] },
+  { id: 'icefall', label: 'Icefall', target: [-3925, 5694, 2157], pos: [-5235, 5814, 3240] },
+  { id: 'cwm', label: 'Cwm', target: [-3070, 6216, 1783], pos: [-4550, 6356, 2033] },
+  { id: 'face', label: 'Lhotse Face', target: [-2450, 6768, 1507], pos: [-4103, 6968, 2633] },
+  { id: 'col', label: 'South Col', target: [-1230, 7936, 845], pos: [-3011, 8176, 1507] },
+  { id: 'ridge', label: 'Summit Ridge', target: [-407, 8670, 359], pos: [-1585, 8850, 1441] },
 ];
 
 /** The finale pull-back: the whole Himalaya below the winner. */
 export const CAM_SUMMIT_WIDE: CamPreset = {
   id: 'wide', label: 'The Top of the World',
-  target: [-100, 8200, 800], pos: [-3400, 11200, 5600],
+  target: [-900, 8263, 800], pos: [-8086, 13863, 7014],
 };

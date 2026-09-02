@@ -21,6 +21,8 @@ import { displayPosAt, edgeChoicesAt, teamStatesAt, teamTags } from '@/lib/clien
 import { sceneLight } from '@/themes/everest/scene';
 import {
   branches3D,
+  heightfieldReady,
+  loadHeightfield,
   buildContours,
   buildFarRange,
   buildTerrain,
@@ -158,9 +160,23 @@ export function MountainMap3D(props: Props) {
   const [mode, setMode] = useState<'ambient' | 'manual'>('ambient');
   const modeRef = useRef(mode);
   modeRef.current = mode;
+  // The massif is a real terrain model fetched as an image, so the scene
+  // cannot be built until it has arrived and been decoded.
+  const [terrainReady, setTerrainReady] = useState(heightfieldReady);
+  const [terrainError, setTerrainError] = useState(false);
+  useEffect(() => {
+    if (terrainReady) return;
+    let live = true;
+    loadHeightfield().then(
+      () => { if (live) setTerrainReady(true); },
+      () => { if (live) setTerrainError(true); },
+    );
+    return () => { live = false; };
+  }, [terrainReady]);
   const presetReq = useRef<string | null>(null);
 
   useEffect(() => {
+    if (!terrainReady) return;
     const wrap = wrapRef.current;
     const labelHost = labelsRef.current;
     if (!wrap || !labelHost) return;
@@ -171,7 +187,10 @@ export function MountainMap3D(props: Props) {
     // Filmic response: highlights roll off instead of clipping, so sunlit
     // snow keeps its form. The sky shader applies the same curve itself.
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.12;
+    // Lowered from 1.12 when the snow shadows were lifted: with the glacier
+    // filling light back in, the sunlit faces clipped and the massif lost the
+    // gradient that describes its shape.
+    renderer.toneMappingExposure = 0.96;
     wrap.appendChild(renderer.domElement);
     renderer.domElement.className = 'm3d-canvas';
 
@@ -184,7 +203,7 @@ export function MountainMap3D(props: Props) {
     controls.enableDamping = true;
     controls.dampingFactor = 0.075;
     controls.minDistance = 900;
-    controls.maxDistance = 26000;
+    controls.maxDistance = 34000;
     // Keep the viewer on the mountain's own hemisphere: straight down turns
     // the massif into a flat map, and below the horizon puts them inside it.
     controls.minPolarAngle = 0.42;
@@ -211,9 +230,9 @@ export function MountainMap3D(props: Props) {
     // Panning can walk the orbit centre off the mountain entirely, and there
     // is no way back. Keep it inside the massif's own box.
     const PAN_BOUNDS = {
-      x: [-5200, 2400] as const,
-      y: [4900, 9200] as const,
-      z: [-1600, 3800] as const,
+      x: [-8400, 3800] as const,
+      y: [4700, 9200] as const,
+      z: [-2600, 6100] as const,
     };
     const clampTarget = () => {
       controls.target.x = Math.min(Math.max(controls.target.x, PAN_BOUNDS.x[0]), PAN_BOUNDS.x[1]);
@@ -350,7 +369,10 @@ export function MountainMap3D(props: Props) {
     scene.add(hemi);
     const amb = new THREE.AmbientLight('#1a2440', 0.25);
     scene.add(amb);
-    scene.fog = new THREE.FogExp2('#8ea6c8', 0.000016);
+    // Densities are per metre, so they had to come down with the world box:
+    // the same coefficients over a 1.6x wider massif hazed the far side of the
+    // mountain into the sky.
+    scene.fog = new THREE.FogExp2('#8ea6c8', 0.00001);
 
     // --- terrain --------------------------------------------------------
     const tData = buildTerrain();
@@ -379,7 +401,7 @@ export function MountainMap3D(props: Props) {
     // change in colour along the exact line where the two meshes meet, which
     // is the hero grid's rectangle: the massif sat on a warm slab while
     // everything beyond it turned blue. Shared here so they cannot drift.
-    const hazeK = { value: 1 / 26000 };
+    const hazeK = { value: 1 / 41600 };
     const terrainUniforms = {
       uDay: { value: 1 },
       uSky: { value: new THREE.Color('#27436b') },
@@ -565,9 +587,9 @@ float tnoise(vec2 p){
             gl_FragColor = vec4(uCol * shade, a * uOp);
           }`,
       });
-      const mesh = new THREE.Mesh(new THREE.PlaneGeometry(56000, 50000), mat);
+      const mesh = new THREE.Mesh(new THREE.PlaneGeometry(90000, 80000), mat);
       mesh.rotation.x = -Math.PI / 2;
-      mesh.position.set(-2000, y, 1000);
+      mesh.position.set(-2300, y, 1700);
       mesh.renderOrder = 4;
       scene.add(mesh);
       return uniforms;
@@ -1058,16 +1080,26 @@ float tnoise(vec2 p){
         );
       }
       sun.position.set(sd[0] * 30000, sd[1] * 30000, sd[2] * 30000);
-      sun.target.position.set(0, 6500, 1000);
+      sun.target.position.set(-2000, 6800, 1500);
       // Low sun goes warm amber, not blood red, and loses power — real
-      // alpenglow is a blush on the faces, never a flood.
-      sun.color.set(L.glow).lerp(tmpColor.set('#ffd9b0'), Math.min(1, 0.3 + sd[1] * 1.6));
+      // alpenglow is a blush on the faces, never a flood. High sun goes back
+      // to white: the amber was the TOP of the ramp, so it lit the massif at
+      // noon as well as at dusk, and snow under a permanently amber sun is
+      // the colour of sand.
+      sun.color.set(L.glow)
+        .lerp(tmpColor.set('#ffd9b0'), Math.min(1, 0.3 + sd[1] * 1.6))
+        .lerp(tmpColor.set('#fff9f0'), Math.min(1, Math.max(0, (sd[1] - 0.22) / 0.48)));
       sun.intensity = (0.12 + dayness * 2.6) * 1.35 * (0.55 + 0.45 * Math.min(1, sd[1] * 2.6));
       moon.position.set(-sd[0] * 22000, 14000, -sd[2] * 22000);
-      moon.target.position.set(0, 6500, 1000);
+      moon.target.position.set(-2000, 6800, 1500);
       moon.intensity = L.darkness * (0.24 + L.moon * 0.22);
       hemi.color.set(L.skyMid);
-      hemi.groundColor.set('#10141f');
+      // The lower hemisphere over a glacier is SNOW, and snow throws most of
+      // the light back up. Pinned at a near-black navy, every face turned away
+      // from the sun fell to almost nothing, so each gully on the model became
+      // a black gash and the flanks read as fur. Real snow shadow is a bright
+      // cold blue — it is filled by the snowfield below it.
+      hemi.groundColor.set('#10141f').lerp(tmpColor.set('#7488a6'), dayness);
       hemi.intensity = (0.26 + dayness * 0.85) * 1.2;
       amb.intensity = 0.18 + L.darkness * 0.18;
       // Snow faintly luminous under starlight — the mountain keeps its form.
@@ -1082,7 +1114,7 @@ float tnoise(vec2 p){
       // the whole massif in flat grey long before the snow or the decks got a
       // say. A storm should obscure the mountain, not delete it.
       (scene.fog as THREE.FogExp2).density =
-        0.000013 + L.haze * 0.000012 + stormNow * 0.00008;
+        0.0000081 + L.haze * 0.0000075 + stormNow * 0.00005;
       // Cloud sea: dense at dawn, burning off toward midday, back at dusk.
       {
         const daily = 0.5 + 0.5 * Math.cos((u - 0.03) * Math.PI * 2.3);
@@ -1513,11 +1545,16 @@ float tnoise(vec2 p){
     };
     // The scene builds once per race; live updates flow through propsRef.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [props.teamNames.join('|')]);
+  }, [props.teamNames.join('|'), terrainReady]);
 
   return (
     <div className="m3d-wrap" ref={wrapRef}>
       <div className="m3d-labels" ref={labelsRef} aria-hidden />
+      {!terrainReady && (
+        <div className="m3d-veil" role="status">
+          {terrainError ? 'The survey never came back — the map is unavailable.' : 'Surveying the mountain…'}
+        </div>
+      )}
       <div className="m3d-legend" aria-hidden>
         <span><i style={{ background: '#2f8f6b' }} />safe</span>
         <span><i style={{ background: '#b3801f' }} />normal</span>
