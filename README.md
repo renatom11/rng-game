@@ -120,6 +120,11 @@ src/app/             Landing, create form, race page, API routes.
 src/components/      Race client: server-offset clock, polling, mountain
                      map (SVG + 3D massif), standings, dispatches feed,
                      rank bump chart, finale views, results, playback bar.
+public/terrain/      massif.png — the mountain itself, an 896x640
+                     heightfield with elevation packed into 12 bits across
+                     two 8-bit channels. The 3D view samples it directly;
+                     the climbing route was fitted to a ridge this surface
+                     actually has, rather than drawn over it.
 ```
 
 Everything about a race is a pure function of `(seed, config)`; the timeline
