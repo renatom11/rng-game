@@ -143,9 +143,47 @@ export function heightfieldReady(): boolean {
 }
 
 /**
- * Decode the heightfield once. `createImageBitmap` with colour management off
- * matters: a colour-managed decode would rewrite the very byte values the
- * elevation is packed into.
+ * Unpack a decoded image into the heightfield and install it.
+ *
+ * Separate from the fetch so the in-Claude demo, whose page may not fetch an
+ * external asset at all, can hand over an ImageBitmap it built from bytes it
+ * already has and still run this exact arithmetic — one unpack, not two that
+ * can drift apart.
+ */
+export function decodeHeightfield(bmp: ImageBitmap): void {
+  const cv = document.createElement('canvas');
+  cv.width = bmp.width;
+  cv.height = bmp.height;
+  const ctx = cv.getContext('2d', { willReadFrequently: true });
+  if (!ctx) throw new Error('no 2d context');
+  ctx.drawImage(bmp, 0, 0);
+  const px = ctx.getImageData(0, 0, bmp.width, bmp.height).data;
+  const n = bmp.width * bmp.height;
+  const out = new Float32Array(n);
+  const span = HF.altPeak - HF.altFloor;
+  for (let i = 0; i < n; i++) {
+    const v = (px[i * 4] << 4) | (px[i * 4 + 1] >> 4);
+    out[i] = HF.altFloor + (v / 4095) * span;
+  }
+  hfData = out;
+  bmp.close();
+}
+
+/** Decode a PNG blob with colour management off, which the pack depends on. */
+export async function heightfieldFromBlob(blob: Blob): Promise<void> {
+  decodeHeightfield(await createImageBitmap(blob, {
+    colorSpaceConversion: 'none',
+    premultiplyAlpha: 'none',
+  }));
+}
+
+/**
+ * Fetch and decode the heightfield once. A colour-managed decode would rewrite
+ * the very byte values the elevation is packed into, hence the options above.
+ *
+ * A failed attempt is not cached: the panel offers no reload of its own, so a
+ * cached rejection would leave the map permanently blank after one flaky
+ * request.
  */
 export function loadHeightfield(): Promise<void> {
   if (hfData) return Promise.resolve();
@@ -153,27 +191,11 @@ export function loadHeightfield(): Promise<void> {
   hfPromise = (async () => {
     const res = await fetch(HF.url);
     if (!res.ok) throw new Error(`heightfield ${res.status}`);
-    const bmp = await createImageBitmap(await res.blob(), {
-      colorSpaceConversion: 'none',
-      premultiplyAlpha: 'none',
-    });
-    const cv = document.createElement('canvas');
-    cv.width = bmp.width;
-    cv.height = bmp.height;
-    const ctx = cv.getContext('2d', { willReadFrequently: true });
-    if (!ctx) throw new Error('no 2d context');
-    ctx.drawImage(bmp, 0, 0);
-    const px = ctx.getImageData(0, 0, bmp.width, bmp.height).data;
-    const n = bmp.width * bmp.height;
-    const out = new Float32Array(n);
-    const span = HF.altPeak - HF.altFloor;
-    for (let i = 0; i < n; i++) {
-      const v = (px[i * 4] << 4) | (px[i * 4 + 1] >> 4);
-      out[i] = HF.altFloor + (v / 4095) * span;
-    }
-    hfData = out;
-    bmp.close();
-  })();
+    await heightfieldFromBlob(await res.blob());
+  })().catch((err) => {
+    hfPromise = null;
+    throw err;
+  });
   return hfPromise;
 }
 
